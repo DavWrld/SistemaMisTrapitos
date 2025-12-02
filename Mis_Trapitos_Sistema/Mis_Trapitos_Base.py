@@ -138,6 +138,8 @@ class DatabaseManager:
                             FOREIGN KEY(proveedor_id) REFERENCES proveedores(id),
                             FOREIGN KEY(categoria_id) REFERENCES categorias(id))''')
         
+        # Lineas de corrección de nombres eliminadas a petición del usuario
+        
         conn.commit()    
         conn.close()
 
@@ -152,6 +154,7 @@ class DatabaseManager:
             cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", 
                            ('vendedor', '1234', 'Vendedor'))
 
+        # LISTA DE CATEGORÍAS ACTUALIZADA
         categorias = ['Camisetas', 'Pantalones', 'Accesorios', 'Calzado', 'Vestidos']
         for cat in categorias:
             cursor.execute("INSERT OR IGNORE INTO categorias (nombre) VALUES (?)", (cat,))
@@ -185,7 +188,6 @@ class Controller:
         conn = self.db.conectar()
         cursor = conn.cursor()
         
-        # 1. VERIFICAR EXISTENCIA (Evitar duplicados)
         cursor.execute("SELECT id, stock FROM productos WHERE nombre=? AND talla=? AND color=? AND proveedor_id=?", 
                        (nombre, talla, color, prov_id))
         producto_existente = cursor.fetchone()
@@ -199,7 +201,6 @@ class Controller:
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', 
                               (nombre, desc, cat_id, precio, talla, color, stock, prov_id))
         
-        # 2. Registrar en Historial
         fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute('''INSERT INTO suministros (fecha, proveedor_id, nombre_producto, categoria_id, cantidad, precio)
                           VALUES (?, ?, ?, ?, ?, ?)''',
@@ -322,11 +323,10 @@ class Controller:
         conn.close()
         return data
 
-    # --- NUEVO: REPORTE DE VENTAS CON FILTROS ---
+    # --- REPORTE DE VENTAS CON FILTROS ---
     def obtener_reporte_ventas(self, dias=None, metodo=None):
         conn = self.db.conectar()
         cursor = conn.cursor()
-        # Traemos: ID, Fecha, Cliente, Vendedor, Total, Metodo
         query = '''SELECT v.id, v.fecha, v.cliente_nombre, u.username, v.total, v.metodo_pago 
                    FROM ventas v 
                    LEFT JOIN usuarios u ON v.usuario_id = u.id 
@@ -337,12 +337,11 @@ class Controller:
         if dias and dias != "Todos":
             try:
                 dias_int = int(dias)
-                # Si hoy es 2023-10-25 y pido 1 día, quiero desde 2023-10-24 00:00:00
                 fecha_limite = (datetime.now() - timedelta(days=dias_int)).strftime("%Y-%m-%d")
                 query += " AND v.fecha >= ?"
                 params.append(fecha_limite)
             except ValueError:
-                pass # Si viene "Todos" o texto invalido, ignoramos
+                pass 
             
         # Filtro de Método de Pago
         if metodo and metodo != "Todos":
@@ -1586,12 +1585,31 @@ class VistaPrincipal:
             frm_filtros = tk.LabelFrame(self.content_area, text="Filtros")
             frm_filtros.pack(fill="x", padx=20, pady=5)
             
+            # Filtro Período
             tk.Label(frm_filtros, text="Período:").pack(side="left", padx=5)
-            cmb_dias = ttk.Combobox(frm_filtros, values=["Todos", "1", "7", "30", "90"], width=10, state="readonly")
-            cmb_dias.current(0)
-            cmb_dias.pack(side="left", padx=5)
-            tk.Label(frm_filtros, text="(días atrás)").pack(side="left")
+            cmb_periodo = ttk.Combobox(frm_filtros, values=["Total", "Personalizado"], width=12, state="readonly")
+            cmb_periodo.current(0)
+            cmb_periodo.pack(side="left", padx=5)
             
+            # Entry días (oculto por defecto)
+            entry_dias = tk.Entry(frm_filtros, width=5)
+            entry_dias.pack(side="left", padx=2)
+            entry_dias.config(state="disabled")
+            
+            lbl_dias_txt = tk.Label(frm_filtros, text="días atrás")
+            lbl_dias_txt.pack(side="left")
+
+            def toggle_entry(event):
+                if cmb_periodo.get() == "Personalizado":
+                    entry_dias.config(state="normal")
+                    entry_dias.focus()
+                else:
+                    entry_dias.delete(0, 'end')
+                    entry_dias.config(state="disabled")
+
+            cmb_periodo.bind("<<ComboboxSelected>>", toggle_entry)
+            
+            # Filtro Método Pago
             tk.Label(frm_filtros, text="Método Pago:").pack(side="left", padx=15)
             cmb_metodo = ttk.Combobox(frm_filtros, values=["Todos", "Efectivo", "Tarjeta", "Transferencia"], width=15, state="readonly")
             cmb_metodo.current(0)
@@ -1606,10 +1624,17 @@ class VistaPrincipal:
             self.lbl_total_reporte.pack(pady=10)
             
             def aplicar_filtro():
-                dias = cmb_dias.get()
+                modo = cmb_periodo.get()
+                dias_valor = None
+                
+                if modo == "Personalizado":
+                    d = entry_dias.get()
+                    if d and d.isdigit():
+                        dias_valor = d
+                
                 metodo = cmb_metodo.get()
                 
-                datos = self.controller.obtener_reporte_ventas(dias, metodo)
+                datos = self.controller.obtener_reporte_ventas(dias_valor, metodo)
                 
                 for i in self.tree_reportes.get_children(): self.tree_reportes.delete(i)
                 
