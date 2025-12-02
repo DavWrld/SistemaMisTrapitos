@@ -28,7 +28,6 @@ class DatabaseManager:
                             password TEXT NOT NULL,
                             rol TEXT NOT NULL)''') 
 
-        # ACTUALIZADO: Agregada categoria_suministro
         cursor.execute('''CREATE TABLE IF NOT EXISTS proveedores (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             nombre TEXT NOT NULL,
@@ -94,6 +93,18 @@ class DatabaseManager:
                             valor2 REAL,
                             fecha_inicio TEXT,
                             fecha_fin TEXT)''')
+        
+        # NUEVA TABLA: Historial de Suministros
+        cursor.execute('''CREATE TABLE IF NOT EXISTS suministros (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            fecha TEXT NOT NULL,
+                            proveedor_id INTEGER,
+                            nombre_producto TEXT,
+                            categoria_id INTEGER,
+                            cantidad INTEGER,
+                            precio REAL,
+                            FOREIGN KEY(proveedor_id) REFERENCES proveedores(id),
+                            FOREIGN KEY(categoria_id) REFERENCES categorias(id))''')
 
         conn.commit()
         conn.close()
@@ -102,35 +113,34 @@ class DatabaseManager:
         conn = self.conectar()
         cursor = conn.cursor()
         
-        # Migraciones previas
-        try:
-            cursor.execute("SELECT direccion FROM clientes LIMIT 1")
-        except sqlite3.OperationalError:
-            cursor.execute("ALTER TABLE clientes ADD COLUMN direccion TEXT")
-            conn.commit()
+        try: cursor.execute("SELECT direccion FROM clientes LIMIT 1")
+        except: cursor.execute("ALTER TABLE clientes ADD COLUMN direccion TEXT"); conn.commit()
             
-        try:
-            cursor.execute("SELECT cliente_id FROM ventas LIMIT 1")
-        except sqlite3.OperationalError:
-            cursor.execute("ALTER TABLE ventas ADD COLUMN cliente_id INTEGER")
-            conn.commit()
+        try: cursor.execute("SELECT cliente_id FROM ventas LIMIT 1")
+        except: cursor.execute("ALTER TABLE ventas ADD COLUMN cliente_id INTEGER"); conn.commit()
 
-        try:
-            cursor.execute("SELECT metodo_pago FROM ventas LIMIT 1")
-        except sqlite3.OperationalError:
-            cursor.execute("ALTER TABLE ventas ADD COLUMN metodo_pago TEXT")
-            conn.commit()
+        try: cursor.execute("SELECT metodo_pago FROM ventas LIMIT 1")
+        except: cursor.execute("ALTER TABLE ventas ADD COLUMN metodo_pago TEXT"); conn.commit()
 
-        # NUEVA MIGRACIÓN: Categoria Suministro en Proveedores
-        try:
-            cursor.execute("SELECT categoria_suministro FROM proveedores LIMIT 1")
-        except sqlite3.OperationalError:
+        try: cursor.execute("SELECT categoria_suministro FROM proveedores LIMIT 1")
+        except: 
             cursor.execute("ALTER TABLE proveedores ADD COLUMN categoria_suministro TEXT")
-            # Asignar valor por defecto a los existentes
             cursor.execute("UPDATE proveedores SET categoria_suministro = 'General' WHERE categoria_suministro IS NULL")
             conn.commit()
             
-        # Corrección de nombres de categorías (del paso anterior)
+        # Revisar si existe tabla suministros (por si acaso)
+        cursor.execute('''CREATE TABLE IF NOT EXISTS suministros (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            fecha TEXT NOT NULL,
+                            proveedor_id INTEGER,
+                            nombre_producto TEXT,
+                            categoria_id INTEGER,
+                            cantidad INTEGER,
+                            precio REAL,
+                            FOREIGN KEY(proveedor_id) REFERENCES proveedores(id),
+                            FOREIGN KEY(categoria_id) REFERENCES categorias(id))''')
+        
+        # Correcciones de nombres
         cursor.execute("UPDATE categorias SET nombre = 'Invierno' WHERE nombre = 'Zapatos'")
         cursor.execute("UPDATE categorias SET nombre = 'Calzado' WHERE nombre = 'Vestidos'")
         
@@ -176,13 +186,22 @@ class Controller:
         conn.close()
         return usuario
 
-    # --- Productos ---
+    # --- Productos & Suministros ---
     def agregar_producto(self, nombre, desc, cat_id, precio, talla, color, stock, prov_id):
         conn = self.db.conectar()
         cursor = conn.cursor()
+        
+        # 1. Insertar en Inventario Actual
         cursor.execute('''INSERT INTO productos (nombre, descripcion, categoria_id, precio, talla, color, stock, proveedor_id)
                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', 
                           (nombre, desc, cat_id, precio, talla, color, stock, prov_id))
+        
+        # 2. Registrar en Historial de Suministros (NUEVO)
+        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute('''INSERT INTO suministros (fecha, proveedor_id, nombre_producto, categoria_id, cantidad, precio)
+                          VALUES (?, ?, ?, ?, ?, ?)''',
+                          (fecha_actual, prov_id, nombre, cat_id, stock, precio))
+        
         conn.commit()
         conn.close()
 
@@ -202,6 +221,28 @@ class Controller:
             if filtro.get('categoria') and filtro['categoria'] != "Todas":
                 query += " AND c.nombre = ?"
                 params.append(filtro['categoria'])
+        
+        cursor.execute(query, params)
+        data = cursor.fetchall()
+        conn.close()
+        return data
+
+    def obtener_historial_suministros(self, proveedor_id, filtro_texto=None):
+        conn = self.db.conectar()
+        cursor = conn.cursor()
+        query = '''SELECT s.id, s.fecha, s.nombre_producto, c.nombre, s.cantidad, s.precio
+                   FROM suministros s
+                   LEFT JOIN categorias c ON s.categoria_id = c.id
+                   WHERE s.proveedor_id = ?'''
+        params = [proveedor_id]
+        
+        if filtro_texto:
+            # Filtrar por fecha o nombre producto
+            query += " AND (s.fecha LIKE ? OR s.nombre_producto LIKE ?)"
+            params.append(f"%{filtro_texto}%")
+            params.append(f"%{filtro_texto}%")
+            
+        query += " ORDER BY s.fecha DESC"
         
         cursor.execute(query, params)
         data = cursor.fetchall()
@@ -281,7 +322,7 @@ class Controller:
         conn.close()
         return data
 
-    # --- Proveedores (ACTUALIZADO con Categoria) ---
+    # --- Proveedores ---
     def agregar_proveedor(self, nombre, direccion, telefono, email, contacto="N/A", categoria_suministro="General"):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -1161,6 +1202,8 @@ class VistaPrincipal:
         tk.Button(frm_btns, text="+ Nuevo Proveedor", command=self.popup_nuevo_proveedor, bg="#4CAF50", fg="white").pack(side="left", padx=5)
         tk.Button(frm_btns, text="📦 Asignar Suministro", command=self.popup_asignar_suministro, bg="#FF9800", fg="white").pack(side="left", padx=5)
         tk.Button(frm_btns, text="Importar CSV Proveedores", command=self.importar_csv_proveedores, bg="#607D8B", fg="white").pack(side="left", padx=5)
+        # NUEVO BOTÓN HISTORIAL
+        tk.Button(frm_btns, text="📜 Historial Suministros", command=self.popup_historial_suministros, bg="#2196F3", fg="white").pack(side="left", padx=5)
         
         # Tabla Proveedores (COLUMNAS ACTUALIZADAS)
         cols = ("ID", "Empresa", "Suministra", "Dirección", "Teléfono")
@@ -1177,15 +1220,101 @@ class VistaPrincipal:
             for i in tree.get_children(): tree.delete(i)
             # BD: id, nombre, contacto, telefono, email, direccion, categoria_suministro
             for p in self.controller.obtener_proveedores():
-                # El campo nuevo está en la posición 6 (índice 6) de la tupla si se agregó al final
-                # Pero en select * el orden depende de la creación.
-                # Si es nuevo schema: id, nombre, contacto, tel, email, dir, cat
                 cat = p[6] if len(p) > 6 else "General"
                 tree.insert("", "end", values=(p[0], p[1], cat, p[5], p[3]))
         
         cargar_provs()
         self.loader_proveedores_ref = cargar_provs
         self.tree_proveedores_ref = tree 
+
+    def popup_historial_suministros(self):
+        sel = self.tree_proveedores_ref.selection()
+        # Si no selecciona ninguno, abrimos selector general
+        
+        top = tk.Toplevel(self.root)
+        top.title("Historial de Suministros por Proveedor")
+        top.geometry("700x500")
+        
+        # --- SECCIÓN 1: SELECCIONAR PROVEEDOR ---
+        frm_top = tk.Frame(top)
+        frm_top.pack(fill="x", padx=10, pady=5)
+        
+        tk.Label(frm_top, text="Proveedor Seleccionado:").pack(side="left")
+        
+        lbl_prov_actual = tk.Label(frm_top, text="Ninguno", font=("Arial", 10, "bold"), fg="blue")
+        lbl_prov_actual.pack(side="left", padx=10)
+        
+        # Combo para cambiar proveedor rápido
+        provs = self.controller.obtener_proveedores()
+        # Lista formato: "ID - Nombre"
+        prov_list = [f"{p[0]} - {p[1]}" for p in provs]
+        cmb_prov = ttk.Combobox(frm_top, values=prov_list, state="readonly", width=30)
+        cmb_prov.pack(side="left", padx=10)
+        
+        # Si veníamos de una selección en la tabla principal, pre-seleccionamos
+        current_prov_id = None
+        if sel:
+            p_data = self.tree_proveedores_ref.item(sel[0])['values']
+            p_str = f"{p_data[0]} - {p_data[1]}"
+            if p_str in prov_list:
+                cmb_prov.set(p_str)
+                lbl_prov_actual.config(text=p_data[1])
+                current_prov_id = p_data[0]
+
+        # --- SECCIÓN 2: FILTROS DE HISTORIAL ---
+        frm_filter = tk.LabelFrame(top, text="Filtrar Historial")
+        frm_filter.pack(fill="x", padx=10, pady=5)
+        
+        tk.Label(frm_filter, text="Buscar (Fecha o Producto):").pack(side="left", padx=5)
+        entry_filter = tk.Entry(frm_filter)
+        entry_filter.pack(side="left", fill="x", expand=True, padx=5)
+        
+        btn_filter = tk.Button(frm_filter, text="🔍 Buscar", command=lambda: cargar_historial())
+        btn_filter.pack(side="left", padx=5)
+        entry_filter.bind("<Return>", lambda e: cargar_historial())
+
+        # --- SECCIÓN 3: TABLA ---
+        cols = ("ID", "Fecha Entrada", "Producto", "Categoría", "Cant", "Costo Unit.")
+        tree_hist = ttk.Treeview(top, columns=cols, show="headings")
+        for c in cols: tree_hist.heading(c, text=c)
+        
+        tree_hist.column("ID", width=30)
+        tree_hist.column("Fecha Entrada", width=120)
+        tree_hist.column("Producto", width=150)
+        tree_hist.column("Categoría", width=80)
+        tree_hist.column("Cant", width=50)
+        tree_hist.column("Costo Unit.", width=70)
+        
+        tree_hist.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        def cargar_historial(event=None):
+            sel_str = cmb_prov.get()
+            if not sel_str: return
+            
+            p_id = int(sel_str.split(" - ")[0])
+            lbl_prov_actual.config(text=sel_str.split(" - ")[1])
+            
+            filtro = entry_filter.get()
+            
+            # Limpiar
+            for i in tree_hist.get_children(): tree_hist.delete(i)
+            
+            # Cargar datos
+            datos = self.controller.obtener_historial_suministros(p_id, filtro)
+            if not datos and not filtro:
+                # Si no hay datos y no es por filtro
+                pass 
+                
+            for d in datos:
+                # d: id, fecha, prod, cat_nom, cant, precio
+                tree_hist.insert("", "end", values=(d[0], d[1], d[2], d[3], d[4], f"${d[5]:.2f}"))
+
+        # Bind para recargar al cambiar combo
+        cmb_prov.bind("<<ComboboxSelected>>", cargar_historial)
+        
+        # Carga inicial si había selección
+        if current_prov_id:
+            cargar_historial()
 
     def popup_nuevo_proveedor(self):
         top = tk.Toplevel(self.root)
