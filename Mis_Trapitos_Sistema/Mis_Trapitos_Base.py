@@ -675,6 +675,10 @@ class VistaPrincipal:
         tree = ttk.Treeview(self.content_area, columns=cols, show="headings")
         tree.pack(fill="both", expand=True, padx=20, pady=10)
         
+        # --- NUEVO: Indicador Total Stock ---
+        self.lbl_total_stock = tk.Label(self.content_area, text="Total Existencias: 0", font=("Arial", 12, "bold"), fg="green")
+        self.lbl_total_stock.pack(pady=10, side="bottom")
+        
         # --- Lógica de Ordenamiento ---
         self.orden_actual = {"col": "ID", "reverse": False} # Por defecto ID Ascendente
 
@@ -711,6 +715,10 @@ class VistaPrincipal:
             }
             # Convertimos a lista para poder ordenar en Python
             productos = list(self.controller.obtener_productos(filtros))
+            
+            # NUEVO: Sumar stock total de la vista actual
+            total_stock_visible = sum(p[7] for p in productos)
+            self.lbl_total_stock.config(text=f"Total Existencias: {total_stock_visible}")
             
             # Aplicar ordenamiento
             col_orden = self.orden_actual["col"]
