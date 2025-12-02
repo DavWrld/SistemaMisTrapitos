@@ -28,13 +28,15 @@ class DatabaseManager:
                             password TEXT NOT NULL,
                             rol TEXT NOT NULL)''') 
 
+        # ACTUALIZADO: Agregada categoria_suministro
         cursor.execute('''CREATE TABLE IF NOT EXISTS proveedores (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             nombre TEXT NOT NULL,
                             contacto TEXT,
                             telefono TEXT,
                             email TEXT,
-                            direccion TEXT)''')
+                            direccion TEXT,
+                            categoria_suministro TEXT)''')
 
         cursor.execute('''CREATE TABLE IF NOT EXISTS categorias (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,6 +102,7 @@ class DatabaseManager:
         conn = self.conectar()
         cursor = conn.cursor()
         
+        # Migraciones previas
         try:
             cursor.execute("SELECT direccion FROM clientes LIMIT 1")
         except sqlite3.OperationalError:
@@ -117,7 +120,21 @@ class DatabaseManager:
         except sqlite3.OperationalError:
             cursor.execute("ALTER TABLE ventas ADD COLUMN metodo_pago TEXT")
             conn.commit()
+
+        # NUEVA MIGRACIÓN: Categoria Suministro en Proveedores
+        try:
+            cursor.execute("SELECT categoria_suministro FROM proveedores LIMIT 1")
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE proveedores ADD COLUMN categoria_suministro TEXT")
+            # Asignar valor por defecto a los existentes
+            cursor.execute("UPDATE proveedores SET categoria_suministro = 'General' WHERE categoria_suministro IS NULL")
+            conn.commit()
             
+        # Corrección de nombres de categorías (del paso anterior)
+        cursor.execute("UPDATE categorias SET nombre = 'Invierno' WHERE nombre = 'Zapatos'")
+        cursor.execute("UPDATE categorias SET nombre = 'Calzado' WHERE nombre = 'Vestidos'")
+        
+        conn.commit()    
         conn.close()
 
     def sembrar_datos_iniciales(self):
@@ -131,14 +148,14 @@ class DatabaseManager:
             cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", 
                            ('vendedor', '1234', 'Vendedor'))
 
-        categorias = ['Camisetas', 'Pantalones', 'Accesorios', 'Zapatos', 'Vestidos']
+        categorias = ['Camisetas', 'Pantalones', 'Accesorios', 'Invierno', 'Calzado']
         for cat in categorias:
             cursor.execute("INSERT OR IGNORE INTO categorias (nombre) VALUES (?)", (cat,))
         
         cursor.execute("SELECT * FROM proveedores")
         if not cursor.fetchone():
-            cursor.execute("INSERT INTO proveedores (nombre, contacto, telefono) VALUES (?,?,?)",
-                           ("Proveedor General", "Juan Perez", "555-0000"))
+            cursor.execute("INSERT INTO proveedores (nombre, contacto, telefono, categoria_suministro) VALUES (?,?,?,?)",
+                           ("Proveedor General", "Juan Perez", "555-0000", "General"))
 
         conn.commit()
         conn.close()
@@ -264,12 +281,13 @@ class Controller:
         conn.close()
         return data
 
-    # --- Proveedores (ACTUALIZADO) ---
-    def agregar_proveedor(self, nombre, direccion, telefono, email, contacto="N/A"):
+    # --- Proveedores (ACTUALIZADO con Categoria) ---
+    def agregar_proveedor(self, nombre, direccion, telefono, email, contacto="N/A", categoria_suministro="General"):
         conn = self.db.conectar()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO proveedores (nombre, direccion, telefono, email, contacto) VALUES (?, ?, ?, ?, ?)",
-                       (nombre, direccion, telefono, email, contacto))
+        cursor.execute('''INSERT INTO proveedores (nombre, direccion, telefono, email, contacto, categoria_suministro) 
+                          VALUES (?, ?, ?, ?, ?, ?)''',
+                       (nombre, direccion, telefono, email, contacto, categoria_suministro))
         conn.commit()
         conn.close()
 
@@ -1142,36 +1160,48 @@ class VistaPrincipal:
         
         tk.Button(frm_btns, text="+ Nuevo Proveedor", command=self.popup_nuevo_proveedor, bg="#4CAF50", fg="white").pack(side="left", padx=5)
         tk.Button(frm_btns, text="📦 Asignar Suministro", command=self.popup_asignar_suministro, bg="#FF9800", fg="white").pack(side="left", padx=5)
-        # NUEVO BOTÓN
         tk.Button(frm_btns, text="Importar CSV Proveedores", command=self.importar_csv_proveedores, bg="#607D8B", fg="white").pack(side="left", padx=5)
         
-        # Tabla Proveedores
-        cols = ("ID", "Empresa", "Dirección", "Teléfono", "Email")
+        # Tabla Proveedores (COLUMNAS ACTUALIZADAS)
+        cols = ("ID", "Empresa", "Suministra", "Dirección", "Teléfono")
         tree = ttk.Treeview(self.content_area, columns=cols, show="headings")
         for c in cols: tree.heading(c, text=c)
         
         tree.column("ID", width=30)
         tree.column("Empresa", width=150)
+        tree.column("Suministra", width=100) # Nueva columna
         tree.column("Dirección", width=200)
         tree.pack(fill="both", expand=True, padx=20, pady=10)
         
         def cargar_provs():
             for i in tree.get_children(): tree.delete(i)
-            # BD: id, nombre, contacto, telefono, email, direccion
+            # BD: id, nombre, contacto, telefono, email, direccion, categoria_suministro
             for p in self.controller.obtener_proveedores():
-                tree.insert("", "end", values=(p[0], p[1], p[5], p[3], p[4]))
+                # El campo nuevo está en la posición 6 (índice 6) de la tupla si se agregó al final
+                # Pero en select * el orden depende de la creación.
+                # Si es nuevo schema: id, nombre, contacto, tel, email, dir, cat
+                cat = p[6] if len(p) > 6 else "General"
+                tree.insert("", "end", values=(p[0], p[1], cat, p[5], p[3]))
         
         cargar_provs()
         self.loader_proveedores_ref = cargar_provs
-        self.tree_proveedores_ref = tree # Para obtener selección
+        self.tree_proveedores_ref = tree 
 
     def popup_nuevo_proveedor(self):
         top = tk.Toplevel(self.root)
         top.title("Registrar Proveedor")
-        top.geometry("400x350")
+        top.geometry("400x400")
         
         tk.Label(top, text="Nombre Empresa:").pack(pady=5)
         entry_nom = tk.Entry(top, width=40); entry_nom.pack()
+        
+        tk.Label(top, text="Categoría Suministro:").pack(pady=5)
+        # Traemos las categorías del sistema para que coincidan
+        cats = [c[1] for c in self.controller.obtener_categorias()]
+        cats.append("Varios") # Opción extra
+        cmb_cat = ttk.Combobox(top, values=cats, state="readonly", width=37)
+        cmb_cat.current(0)
+        cmb_cat.pack()
         
         tk.Label(top, text="Dirección:").pack(pady=5)
         entry_dir = tk.Entry(top, width=40); entry_dir.pack()
@@ -1184,8 +1214,9 @@ class VistaPrincipal:
         
         def guardar():
             nom = entry_nom.get()
+            cat = cmb_cat.get()
             if nom:
-                self.controller.agregar_proveedor(nom, entry_dir.get(), entry_tel.get(), entry_email.get())
+                self.controller.agregar_proveedor(nom, entry_dir.get(), entry_tel.get(), entry_email.get(), "N/A", cat)
                 messagebox.showinfo("Éxito", "Proveedor registrado")
                 top.destroy()
                 self.loader_proveedores_ref()
@@ -1256,7 +1287,7 @@ class VistaPrincipal:
         
         tk.Button(top, text="Registrar Entrada", command=registrar_suministro, bg="#4CAF50", fg="white").pack(pady=20)
 
-    # NUEVO: Función para importar Proveedores desde CSV
+    # NUEVO: Función para importar Proveedores desde CSV con Categoria
     def importar_csv_proveedores(self):
         archivo_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if not archivo_path:
@@ -1267,14 +1298,14 @@ class VistaPrincipal:
                 reader = csv.DictReader(archivo)
                 count = 0
                 for row in reader:
-                    # Intenta leer varias posibles columnas para ser flexible
                     nom = row.get("Empresa", row.get("Nombre", "Proveedor Importado"))
                     dire = row.get("Direccion", "")
                     tel = row.get("Telefono", "")
                     mail = row.get("Email", "")
                     cont = row.get("Contacto", "N/A")
+                    cat = row.get("CategoriaSuministro", "Varios") # Nueva columna
                     
-                    self.controller.agregar_proveedor(nom, dire, tel, mail, cont)
+                    self.controller.agregar_proveedor(nom, dire, tel, mail, cont, cat)
                     count += 1
             messagebox.showinfo("Éxito", f"Se importaron {count} proveedores correctamente.")
             self.loader_proveedores_ref()
