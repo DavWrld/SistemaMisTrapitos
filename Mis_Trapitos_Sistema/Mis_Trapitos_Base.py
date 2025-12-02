@@ -138,9 +138,6 @@ class DatabaseManager:
                             FOREIGN KEY(proveedor_id) REFERENCES proveedores(id),
                             FOREIGN KEY(categoria_id) REFERENCES categorias(id))''')
         
-        cursor.execute("UPDATE categorias SET nombre = 'Invierno' WHERE nombre = 'Zapatos'")
-        cursor.execute("UPDATE categorias SET nombre = 'Calzado' WHERE nombre = 'Vestidos'")
-        
         conn.commit()    
         conn.close()
 
@@ -155,7 +152,7 @@ class DatabaseManager:
             cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", 
                            ('vendedor', '1234', 'Vendedor'))
 
-        categorias = ['Camisetas', 'Pantalones', 'Accesorios', 'Invierno', 'Calzado']
+        categorias = ['Camisetas', 'Pantalones', 'Accesorios', 'Calzado', 'Vestidos']
         for cat in categorias:
             cursor.execute("INSERT OR IGNORE INTO categorias (nombre) VALUES (?)", (cat,))
         
@@ -184,34 +181,54 @@ class Controller:
         return usuario
 
     # --- Productos & Suministros ---
-    # ACTUALIZADO: Lógica de detección de duplicados
     def agregar_producto(self, nombre, desc, cat_id, precio, talla, color, stock, prov_id):
         conn = self.db.conectar()
         cursor = conn.cursor()
         
-        # 1. VERIFICAR EXISTENCIA
-        # Buscamos si ya existe un producto idéntico (Nombre, Talla, Color, Proveedor)
+        # 1. VERIFICAR EXISTENCIA (Evitar duplicados)
         cursor.execute("SELECT id, stock FROM productos WHERE nombre=? AND talla=? AND color=? AND proveedor_id=?", 
                        (nombre, talla, color, prov_id))
         producto_existente = cursor.fetchone()
         
         if producto_existente:
-            # SI EXISTE: Actualizamos el stock sumando lo nuevo
             prod_id = producto_existente[0]
             nuevo_stock = producto_existente[1] + stock
-            cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (nuevo_stock, prod_id))
-            # Opcional: Podríamos actualizar el precio si cambió, pero por ahora conservamos el stock
+            cursor.execute("UPDATE productos SET stock = ?, precio = ? WHERE id = ?", (nuevo_stock, precio, prod_id))
         else:
-            # NO EXISTE: Insertamos nuevo registro
             cursor.execute('''INSERT INTO productos (nombre, descripcion, categoria_id, precio, talla, color, stock, proveedor_id)
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', 
                               (nombre, desc, cat_id, precio, talla, color, stock, prov_id))
         
-        # 2. Registrar SIEMPRE en Historial de Suministros (Auditoría)
+        # 2. Registrar en Historial
         fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute('''INSERT INTO suministros (fecha, proveedor_id, nombre_producto, categoria_id, cantidad, precio)
                           VALUES (?, ?, ?, ?, ?, ?)''',
                           (fecha_actual, prov_id, nombre, cat_id, stock, precio))
+        
+        conn.commit()
+        conn.close()
+
+    # NUEVO: Reabastecimiento específico por ID de producto existente
+    def reabastecer_producto(self, prod_id, cantidad, precio_nuevo):
+        conn = self.db.conectar()
+        cursor = conn.cursor()
+        
+        # Obtener datos actuales
+        cursor.execute("SELECT nombre, categoria_id, stock, proveedor_id FROM productos WHERE id=?", (prod_id,))
+        prod = cursor.fetchone()
+        if not prod: return
+        
+        nombre, cat_id, stock_actual, prov_id = prod
+        
+        # Actualizar Producto
+        nuevo_stock = stock_actual + cantidad
+        cursor.execute("UPDATE productos SET stock = ?, precio = ? WHERE id = ?", (nuevo_stock, precio_nuevo, prod_id))
+        
+        # Insertar en Historial Suministros
+        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute('''INSERT INTO suministros (fecha, proveedor_id, nombre_producto, categoria_id, cantidad, precio)
+                          VALUES (?, ?, ?, ?, ?, ?)''',
+                          (fecha_actual, prov_id, nombre, cat_id, cantidad, precio_nuevo))
         
         conn.commit()
         conn.close()
@@ -232,6 +249,10 @@ class Controller:
             if filtro.get('categoria') and filtro['categoria'] != "Todas":
                 query += " AND c.nombre = ?"
                 params.append(filtro['categoria'])
+            # NUEVO FILTRO: Por Proveedor ID
+            if filtro.get('proveedor_id'):
+                query += " AND p.proveedor_id = ?"
+                params.append(filtro['proveedor_id'])
         
         cursor.execute(query, params)
         data = cursor.fetchall()
@@ -1211,8 +1232,9 @@ class VistaPrincipal:
         
         tk.Button(frm_btns, text="+ Nuevo Proveedor", command=self.popup_nuevo_proveedor, bg="#4CAF50", fg="white").pack(side="left", padx=5)
         tk.Button(frm_btns, text="📦 Asignar Suministro", command=self.popup_asignar_suministro, bg="#FF9800", fg="white").pack(side="left", padx=5)
+        # NUEVO BOTÓN: SELECCIONAR EXISTENTE
+        tk.Button(frm_btns, text="🔄 Seleccionar Existente", command=self.popup_seleccionar_existente, bg="#009688", fg="white").pack(side="left", padx=5)
         tk.Button(frm_btns, text="Importar CSV Proveedores", command=self.importar_csv_proveedores, bg="#607D8B", fg="white").pack(side="left", padx=5)
-        # NUEVO BOTÓN HISTORIAL
         tk.Button(frm_btns, text="📜 Historial Suministros", command=self.popup_historial_suministros, bg="#2196F3", fg="white").pack(side="left", padx=5)
         
         # Tabla Proveedores (COLUMNAS ACTUALIZADAS)
@@ -1424,6 +1446,74 @@ class VistaPrincipal:
                 messagebox.showerror("Error Crítico", str(e))
         
         tk.Button(top, text="Registrar Entrada", command=registrar_suministro, bg="#4CAF50", fg="white").pack(pady=20)
+
+    # NUEVO: Popup para reabastecer producto existente
+    def popup_seleccionar_existente(self):
+        sel = self.tree_proveedores_ref.selection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Seleccione un proveedor de la lista primero.")
+            return
+            
+        prov_data = self.tree_proveedores_ref.item(sel[0])['values']
+        prov_id = prov_data[0]
+        prov_nombre = prov_data[1]
+        
+        top = tk.Toplevel(self.root)
+        top.title(f"Reabastecer de: {prov_nombre}")
+        top.geometry("600x400")
+        
+        tk.Label(top, text=f"Productos suministrados por {prov_nombre}", font=("Arial", 10, "bold")).pack(pady=10)
+        
+        # Tabla de productos de este proveedor
+        cols = ("ID", "Producto", "Talla", "Color", "Precio Actual", "Stock Actual")
+        tree_prods = ttk.Treeview(top, columns=cols, show="headings")
+        for c in cols: tree_prods.heading(c, text=c)
+        
+        tree_prods.column("ID", width=30)
+        tree_prods.column("Producto", width=150)
+        tree_prods.column("Talla", width=50)
+        tree_prods.column("Color", width=80)
+        tree_prods.column("Precio Actual", width=80)
+        tree_prods.column("Stock Actual", width=80)
+        
+        tree_prods.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Cargar productos filtrados por proveedor
+        filtros = {'proveedor_id': prov_id}
+        productos = self.controller.obtener_productos(filtros)
+        
+        if not productos:
+            tk.Label(top, text="No hay productos registrados de este proveedor.", fg="red").pack()
+        
+        for p in productos:
+            # p: id, nombre, desc, catid, precio, talla, color, stock, provid, catnom, provnom
+            tree_prods.insert("", "end", values=(p[0], p[1], p[5], p[6], f"${p[4]:.2f}", p[7]))
+            
+        def agregar_stock():
+            sel_prod = tree_prods.selection()
+            if not sel_prod: return
+            
+            item = tree_prods.item(sel_prod[0])['values']
+            prod_id = item[0]
+            prod_nombre = item[1]
+            precio_actual_str = item[4].replace("$", "")
+            
+            # Pedir cantidad
+            cant = simpledialog.askinteger("Reabastecer", f"Cantidad a agregar de:\n{prod_nombre}", parent=top, minvalue=1)
+            if not cant: return
+            
+            # Pedir precio (opcional, por si cambió el costo)
+            precio_nuevo = simpledialog.askfloat("Precio", f"Precio unitario ($):", parent=top, initialvalue=float(precio_actual_str), minvalue=0)
+            if precio_nuevo is None: return 
+            
+            try:
+                self.controller.reabastecer_producto(prod_id, cant, precio_nuevo)
+                messagebox.showinfo("Éxito", f"Se agregaron {cant} unidades a {prod_nombre}.")
+                top.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+
+        tk.Button(top, text="➕ Agregar Stock al Seleccionado", command=agregar_stock, bg="#009688", fg="white", font=("Arial", 11)).pack(pady=15)
 
     # NUEVO: Función para importar Proveedores desde CSV con Categoria
     def importar_csv_proveedores(self):
