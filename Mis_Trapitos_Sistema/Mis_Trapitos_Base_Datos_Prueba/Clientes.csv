@@ -1,0 +1,98 @@
+Nombre,Direccion,Telefono,Email
+Juan Pérez,Av. Reforma 123 CDMX,555-0101,juan.perez@email.com
+María López,Calle Pino 45 Guadalajara,333-0202,maria.lopez@email.com
+Carlos García,Blvd. Águilas 88 Monterrey,818-0303,carlos.garcia@email.com
+Ana Martínez,Calle 5 de Mayo 12 Puebla,222-0404,ana.martinez@email.com
+Luis Rodríguez,Av. Vallarta 500 Guadalajara,333-0505,luis.rod@email.com
+Fernanda González,Calle Roble 23 Querétaro,442-0606,fer.gonzalez@email.com
+José Hernández,Av. Insurgentes 100 CDMX,555-0707,jose.hdz@email.com
+Laura Sánchez,Calle Madero 8 León,477-0808,laura.sanchez@email.com
+Miguel Ramírez,Blvd. Kukulcán 10 Cancún,998-0909,miguel.ramirez@email.com
+Sofía Torres,Calle Juárez 45 Toluca,722-1010,sofia.torres@email.com
+David Flores,Av. Chapultepec 200 Guadalajara,333-1111,david.flores@email.com
+Lucía Díaz,Calle Hidalgo 5 Veracruz,229-1212,lucia.diaz@email.com
+Daniel Morales,Av. Universidad 30 Monterrey,818-1313,daniel.morales@email.com
+Elena Vásquez,Calle Zaragoza 9 Tijuana,664-1414,elena.vasquez@email.com
+Pedro Castillo,Av. Constitución 80 Monterrey,818-1515,pedro.castillo@email.com
+Carmen Ortiz,Calle Allende 11 Morelia,443-1616,carmen.ortiz@email.com
+Javier Gutiérrez,Av. Tecnológico 55 Chihuahua,614-1717,javier.gutierrez@email.com
+Adriana Ruiz,Calle Bravo 22 Saltillo,844-1818,adriana.ruiz@email.com
+Alejandro Castro,Av. Costera 90 Acapulco,744-1919,alejandro.castro@email.com
+Verónica Jiménez,Calle Victoria 33 Durango,618-2020,vero.jimenez@email.com
+Ricardo Silva,Av. Central 77 Tuxtla,961-2121,ricardo.silva@email.com
+Mónica Mendoza,Calle Aldama 6 Toluca,722-2222,monica.mendoza@email.com
+Jorge Romero,Av. Las Américas 100 Xalapa,228-2323,jorge.romero@email.com
+Patricia Navarro,Calle Guerrero 44 Pachuca,771-2424,patricia.navarro@email.com
+Roberto Guerrero,Av. Bonampak 12 Cancún,998-2525,roberto.guerrero@email.com
+Gabriela Méndez,Calle 16 de Septiembre 8 Villahermosa,993-2626,gaby.mendez@email.com
+Francisco Aguilar,Av. Camelinas 200 Morelia,443-2727,francisco.aguilar@email.com
+Rosa Vargas,Calle Obregón 15 Culiacán,667-2828,rosa.vargas@email.com
+Manuel Ramos,Av. Venustiano Carranza 30 SLP,444-2929,manuel.ramos@email.com
+Teresa Reyes,Calle Matamoros 10 Hermosillo,662-3030,teresa.reyes@email.com
+Héctor Herrera,Av. López Mateos 400 Guadalajara,333-3131,hector.herrera@email.com
+Silvia Medina,Calle Galeana 5 Aguascalientes,449-3232,silvia.medina@email.com
+Raúl Domínguez,Av. 20 de Noviembre 22 CDMX,555-3333,raul.dominguez@email.com
+Isabel Cruz,Calle Mina 8 Zacatecas,492-3434,isabel.cruz@email.com
+Alberto Ortega,Av. Héroes de Nacozari 55 Aguascalientes,449-3535,alberto.ortega@email.com
+Lorena Pacheco,Calle 60 10 Mérida,999-3636,lorena.pacheco@email.com
+Eduardo Rios,Av. Montejo 100 Mérida,999-3737,eduardo.rios@email.com
+Martha Solís,Calle Lerdo 12 Tepic,311-3838,martha.solis@email.com
+Oscar Miranda,Av. Cuauhtémoc 50 Acapulco,744-3939,oscar.miranda@email.com
+Claudia Carrillo,Calle Benito Juárez 9 Oaxaca,951-4040,claudia.carrillo@email.com
+Felipe Cárdenas,Av. Universidad 88 Querétaro,442-4141,felipe.cardenas@email.com
+Gloria Cervantes,Calle Revolución 5 Tijuana,664-4242,gloria.cervantes@email.com
+Andrés Lara,Av. Constituyentes 20 CDMX,555-4343,andres.lara@email.com
+Alicia Vega,Calle Altamirano 10 La Paz,612-4444,alicia.vega@email.com
+Guillermo Campos,Av. Forjadores 33 La Paz,612-4545,guillermo.campos@email.com
+Beatriz Maldonado,Calle Abasolo 4 Torreón,871-4646,beatriz.maldonado@email.com
+Sergio Padilla,Av. Juárez 100 Torreón,871-4747,sergio.padilla@email.com
+Daniela Rosales,Calle Zaragoza 88 Saltillo,844-4848,daniela.rosales@email.com
+Hugo Fuentes,Av. Universidad 50 Tampico,833-4949,hugo.fuentes@email.com
+Mariana Valenzuela,Calle Hidalgo 12 Mazatlán,669-5050,mariana.valenzuela@email.com
+Pablo Espinoza,Av. del Mar 20 Mazatlán,669-5151,pablo.espinoza@email.com
+Natalia Valencia,Calle Morelos 5 Cuernavaca,777-5252,natalia.valencia@email.com
+Victor Rivas,Av. Plan de Ayala 100 Cuernavaca,777-5353,victor.rivas@email.com
+Andrea Molina,Calle 5 10 Córdoba,271-5454,andrea.molina@email.com
+Gustavo Ibarra,Av. 1 20 Córdoba,271-5555,gustavo.ibarra@email.com
+Paola Cabrera,Calle Real 8 Orizaba,272-5656,paola.cabrera@email.com
+Ignacio Delgado,Av. Oriente 6 50 Orizaba,272-5757,ignacio.delgado@email.com
+Yolanda Peña,Calle 11 15 Celaya,461-5858,yolanda.pena@email.com
+Martín Franco,Av. Tecnológico 100 Celaya,461-5959,martin.franco@email.com
+Sara Acosta,Calle Hidalgo 20 Irapuato,462-6060,sara.acosta@email.com
+Rubén Nava,Av. Guerrero 50 Irapuato,462-6161,ruben.nava@email.com
+Diana Sosa,Calle Madero 10 Lagos de Moreno,474-6262,diana.sosa@email.com
+Emilio Castañeda,Av. Félix Ramírez 20 Lagos de Moreno,474-6363,emilio.castaneda@email.com
+Karla Orozco,Calle Juárez 5 Tepatitlán,378-6464,karla.orozco@email.com
+Fernando Trejo,Av. González Gallo 30 Tepatitlán,378-6565,fernando.trejo@email.com
+Estela Arroyo,Calle Hidalgo 8 Ciudad Guzmán,341-6666,estela.arroyo@email.com
+Mauricio Figueroa,Av. Reforma 20 Ciudad Guzmán,341-6767,mauricio.figueroa@email.com
+Cristina Beltrán,Calle Zaragoza 10 Colima,312-6868,cristina.beltran@email.com
+Arturo Meza,Av. Felipe Sevilla 50 Colima,312-6969,arturo.meza@email.com
+Julia Gallegos,Calle Madero 5 Manzanillo,314-7070,julia.gallegos@email.com
+Diego Parra,Blvd. Costero 100 Manzanillo,314-7171,diego.parra@email.com
+Leticia Cueva,Calle Hidalgo 12 Puerto Vallarta,322-7272,leticia.cueva@email.com
+Samuel Leon,Av. Francisco Medina 50 Puerto Vallarta,322-7373,samuel.leon@email.com
+Rocio Zamora,Calle Juárez 8 Tepic,311-7474,rocio.zamora@email.com
+Enrique Pineda,Av. Insurgentes 30 Tepic,311-7575,enrique.pineda@email.com
+Pilar Escobar,Calle Morelos 5 Zacatecas,492-7676,pilar.escobar@email.com
+Ramon Davila,Av. Hidalgo 20 Zacatecas,492-7777,ramon.davila@email.com
+Olivia Bernal,Calle 5 de Mayo 10 Fresnillo,493-7878,olivia.bernal@email.com
+Cesar Quiroz,Av. Plateros 50 Fresnillo,493-7979,cesar.quiroz@email.com
+Irma Barajas,Calle Juárez 5 San Luis Potosí,444-8080,irma.barajas@email.com
+Gonzalo Villalobos,Av. Carranza 100 San Luis Potosí,444-8181,gonzalo.villalobos@email.com
+Susana Galvan,Calle Madero 20 Matehuala,488-8282,susana.galvan@email.com
+Mario Zavala,Av. Roble 10 Matehuala,488-8383,mario.zavala@email.com
+Clara Tapia,Calle Hidalgo 8 Ciudad Valles,481-8484,clara.tapia@email.com
+Felipe Montes,Blvd. México 50 Ciudad Valles,481-8585,felipe.montes@email.com
+Lidia Aguirre,Calle Juárez 5 Río Verde,487-8686,lidia.aguirre@email.com
+Tomas Esparza,Av. Centenario 20 Río Verde,487-8787,tomas.esparza@email.com
+Blanca Calderon,Calle Morelos 10 Tamazunchale,483-8888,blanca.calderon@email.com
+Jaime Duarte,Av. 20 de Noviembre 30 Tamazunchale,483-8989,jaime.duarte@email.com
+Elvira Serrano,Calle Hidalgo 5 Tampico,833-9090,elvira.serrano@email.com
+Rodolfo Salinas,Av. Universidad 100 Tampico,833-9191,rodolfo.salinas@email.com
+Maribel Corona,Calle Juárez 20 Ciudad Madero,833-9292,maribel.corona@email.com
+Saul Ocampo,Av. Madero 50 Ciudad Madero,833-9393,saul.ocampo@email.com
+Noemi Rosas,Calle 1 10 Altamira,833-9494,noemi.rosas@email.com
+Gerardo Esquivel,Blvd. Allende 30 Altamira,833-9595,gerardo.esquivel@email.com
+Angelica Reyna,Calle Hidalgo 8 Ciudad Victoria,834-9696,angelica.reyna@email.com
+Ivan Mata,Av. Tamaulipas 50 Ciudad Victoria,834-9797,ivan.mata@email.com
