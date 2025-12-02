@@ -206,7 +206,6 @@ class Controller:
         conn.commit()
         conn.close()
 
-    # ACTUALIZADO: Búsqueda por filtro (ID o Nombre)
     def obtener_clientes(self, busqueda=None):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -215,7 +214,6 @@ class Controller:
         params = []
         
         if busqueda:
-            # Busca si el texto coincide con el nombre O si es igual al ID
             query += " AND (nombre LIKE ? OR id LIKE ?)"
             params.append(f"%{busqueda}%")
             params.append(f"{busqueda}%")
@@ -584,6 +582,15 @@ class VistaPrincipal:
         self.total_var = tk.StringVar(value="TOTAL A PAGAR: $0.00")
         tk.Label(frm_der, textvariable=self.total_var, font=("Arial", 16, "bold"), fg="blue").pack(pady=10)
 
+        # ---------------------------------------------------------------------
+        # CORRECCIÓN: Conectamos los elementos visuales a 'self' para que el Popup
+        # pueda acceder a ellos y limpiarlos al cobrar.
+        # ---------------------------------------------------------------------
+        self.tree_pos_cart_ref = tree_cart
+        self.lbl_subtotal_ref = self.lbl_subtotal
+        self.lbl_desc_global_ref = self.lbl_desc_global
+        self.total_var_ref = self.total_var
+
         # Logica de carga
         def cargar_prods_pos():
             for i in tree_prods.get_children(): tree_prods.delete(i)
@@ -641,11 +648,8 @@ class VistaPrincipal:
                 
             self.total_var.set(f"TOTAL: ${res['total_final']:.2f}")
 
-        # NUEVO: Lógica para mostrar Popup de selección de clientes
         def finalizar_venta():
             if not self.carrito_raw: return
-            
-            # Abrir Popup de Selección
             self.popup_seleccionar_cliente()
 
         tk.Button(frm_izq, text="Agregar al Carrito >>", command=agregar_al_carrito, bg="#4CAF50", fg="white").pack(pady=5)
@@ -664,7 +668,6 @@ class VistaPrincipal:
         entry_search = tk.Entry(frm_search)
         entry_search.pack(side="left", fill="x", expand=True)
         
-        # Tabla de clientes en el popup
         cols = ("ID", "Nombre", "Email")
         tree_cli = ttk.Treeview(top, columns=cols, show="headings")
         tree_cli.heading("ID", text="ID"); tree_cli.column("ID", width=50)
@@ -675,10 +678,8 @@ class VistaPrincipal:
         def buscar_clientes(event=None):
             busqueda = entry_search.get()
             for i in tree_cli.get_children(): tree_cli.delete(i)
-            # Usamos la nueva función del controller con filtro
             clientes = self.controller.obtener_clientes(busqueda)
             for c in clientes:
-                # Manejo seguro si la tupla tiene 4 o 5 elementos (por el update de schema)
                 if len(c) == 5:
                     tree_cli.insert("", "end", values=(c[0], c[1], c[4]))
                 else:
@@ -688,13 +689,12 @@ class VistaPrincipal:
         btn_search.pack(side="left", padx=5)
         entry_search.bind("<Return>", buscar_clientes)
         
-        buscar_clientes() # Carga inicial
+        buscar_clientes()
 
         def confirmar_seleccion():
             sel = tree_cli.selection()
             if sel:
                 item = tree_cli.item(sel[0])['values']
-                # item[0] es ID, item[1] es Nombre
                 cliente_nombre = f"{item[1]} (ID: {item[0]})"
                 procesar_pago(cliente_nombre)
                 top.destroy()
@@ -717,16 +717,13 @@ class VistaPrincipal:
                 self.carrito_raw = []
                 self.calculo_actual = None
                 
-                # Recargar UI principal (truco: llamar a refresh del carrito y pos)
-                # Como self.carrito_raw ya está vacío, esto limpia la pantalla
+                # Recargar UI principal usando las referencias creadas
                 for i in self.tree_pos_cart_ref.get_children(): self.tree_pos_cart_ref.delete(i)
                 self.lbl_subtotal_ref.config(text="Subtotal: $0.00")
                 self.lbl_desc_global_ref.config(text="")
                 self.total_var_ref.set("Total: $0.00")
                 
                 # Recargar stocks
-                # Nota: Necesitamos acceder a cargar_prods_pos que está dentro de mostrar_pos.
-                # Solución simple: Volver a cargar la vista POS completa
                 self.mostrar_pos()
                 
             except Exception as e:
@@ -737,12 +734,6 @@ class VistaPrincipal:
         
         tk.Button(frm_btns, text="Usar Público General", command=publico_general, bg="#777", fg="white").pack(side="left", padx=10)
         tk.Button(frm_btns, text="Seleccionar Cliente", command=confirmar_seleccion, bg="#2196F3", fg="white").pack(side="left", padx=10)
-        
-        # Referencias para limpiar UI principal desde el popup
-        # Buscamos los widgets en self (que definimos en mostrar_pos)
-        # Como mostrar_pos recrea widgets, asignaremos las refs aquí para que procesar_pago las use si fuera necesario,
-        # aunque llamar self.mostrar_pos() al final es más limpio.
-        pass
 
     # ========================== VISTA: PROMOCIONES ==========================
     def mostrar_promociones(self):
