@@ -138,8 +138,6 @@ class DatabaseManager:
                             FOREIGN KEY(proveedor_id) REFERENCES proveedores(id),
                             FOREIGN KEY(categoria_id) REFERENCES categorias(id))''')
         
-        # Lineas de corrección de nombres eliminadas a petición del usuario
-        
         conn.commit()    
         conn.close()
 
@@ -154,7 +152,7 @@ class DatabaseManager:
             cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", 
                            ('vendedor', '1234', 'Vendedor'))
 
-        # LISTA DE CATEGORÍAS ACTUALIZADA
+        # LISTA DE CATEGORÍAS ACTUALIZADA (Versión Final)
         categorias = ['Camisetas', 'Pantalones', 'Accesorios', 'Calzado', 'Vestidos']
         for cat in categorias:
             cursor.execute("INSERT OR IGNORE INTO categorias (nombre) VALUES (?)", (cat,))
@@ -323,7 +321,7 @@ class Controller:
         conn.close()
         return data
 
-    # --- REPORTE DE VENTAS CON FILTROS ---
+    # --- REPORTES AVANZADOS ---
     def obtener_reporte_ventas(self, dias=None, metodo=None):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -333,17 +331,14 @@ class Controller:
                    WHERE 1=1'''
         params = []
         
-        # Filtro de Días
         if dias and dias != "Todos":
             try:
                 dias_int = int(dias)
                 fecha_limite = (datetime.now() - timedelta(days=dias_int)).strftime("%Y-%m-%d")
                 query += " AND v.fecha >= ?"
                 params.append(fecha_limite)
-            except ValueError:
-                pass 
+            except ValueError: pass
             
-        # Filtro de Método de Pago
         if metodo and metodo != "Todos":
             query += " AND v.metodo_pago = ?"
             params.append(metodo)
@@ -354,6 +349,53 @@ class Controller:
         data = cursor.fetchall()
         conn.close()
         return data
+
+    def ejecutar_consulta_reporte(self, tipo_reporte, dias=None):
+        conn = self.db.conectar()
+        cursor = conn.cursor()
+        columnas = []
+        data = []
+        
+        if tipo_reporte == "Bajo Stock":
+            cursor.execute("SELECT nombre, stock, stock_minimo FROM productos WHERE stock <= stock_minimo")
+            columnas = ["Producto", "Stock Actual", "Mínimo"]
+            data = cursor.fetchall()
+            
+        elif tipo_reporte == "Ventas del Dia":
+            hoy = date.today().strftime("%Y-%m-%d")
+            cursor.execute('''SELECT v.id, v.fecha, v.cliente_nombre, v.total, u.username 
+                              FROM ventas v 
+                              JOIN usuarios u ON v.usuario_id = u.id 
+                              WHERE v.fecha LIKE ?''', (f"{hoy}%",))
+            columnas = ["ID Venta", "Fecha", "Cliente", "Total", "Vendedor"]
+            data = cursor.fetchall()
+            
+        elif tipo_reporte == "Top Productos":
+            # Modificado para soportar filtro de días
+            query = '''SELECT p.nombre, SUM(d.cantidad) as total_vendido 
+                       FROM detalle_ventas d
+                       JOIN productos p ON d.producto_id = p.id
+                       JOIN ventas v ON d.venta_id = v.id
+                       WHERE 1=1'''
+            params = []
+            
+            if dias and dias != "Total":
+                try:
+                    dias_int = int(dias)
+                    fecha_limite = (datetime.now() - timedelta(days=dias_int)).strftime("%Y-%m-%d")
+                    query += " AND v.fecha >= ?"
+                    params.append(fecha_limite)
+                except ValueError: pass
+
+            query += ''' GROUP BY p.id
+                         ORDER BY total_vendido DESC LIMIT 10'''
+            
+            cursor.execute(query, params)
+            columnas = ["Producto", "Unidades Vendidas"]
+            data = cursor.fetchall()
+
+        conn.close()
+        return columnas, data
 
     # --- Clientes ---
     def agregar_cliente(self, nombre, direccion, telefono, email):
@@ -530,38 +572,6 @@ class Controller:
         data = cursor.fetchall()
         conn.close()
         return data
-
-    def ejecutar_consulta_reporte(self, tipo_reporte):
-        conn = self.db.conectar()
-        cursor = conn.cursor()
-        columnas = []
-        data = []
-        
-        if tipo_reporte == "Bajo Stock":
-            cursor.execute("SELECT nombre, stock, stock_minimo FROM productos WHERE stock <= stock_minimo")
-            columnas = ["Producto", "Stock Actual", "Mínimo"]
-            data = cursor.fetchall()
-            
-        elif tipo_reporte == "Ventas del Dia":
-            hoy = date.today().strftime("%Y-%m-%d")
-            cursor.execute('''SELECT v.id, v.fecha, v.cliente_nombre, v.total, u.username 
-                              FROM ventas v 
-                              JOIN usuarios u ON v.usuario_id = u.id 
-                              WHERE v.fecha LIKE ?''', (f"{hoy}%",))
-            columnas = ["ID Venta", "Fecha", "Cliente", "Total", "Vendedor"]
-            data = cursor.fetchall()
-            
-        elif tipo_reporte == "Top Productos":
-            cursor.execute('''SELECT p.nombre, SUM(d.cantidad) as total_vendido 
-                              FROM detalle_ventas d
-                              JOIN productos p ON d.producto_id = p.id
-                              GROUP BY p.id
-                              ORDER BY total_vendido DESC LIMIT 5''')
-            columnas = ["Producto", "Unidades Vendidas"]
-            data = cursor.fetchall()
-
-        conn.close()
-        return columnas, data
 
 # =============================================================================
 # CAPA DE VISTA (INTERFAZ GRÁFICA)
@@ -1575,7 +1585,6 @@ class VistaPrincipal:
 
         ttk.Button(frm_btns, text="Productos Bajo Stock", command=lambda: ver_simple("Bajo Stock")).pack(side="left", padx=5)
         ttk.Button(frm_btns, text="Ventas del Día", command=lambda: ver_simple("Ventas del Dia")).pack(side="left", padx=5)
-        ttk.Button(frm_btns, text="Más Vendidos", command=lambda: ver_simple("Top Productos")).pack(side="left", padx=5)
         
         # REPORTE AVANZADO: VENTAS TOTALES
         def mostrar_filtro_ventas():
@@ -1654,8 +1663,56 @@ class VistaPrincipal:
             
             aplicar_filtro() # Carga inicial
 
+        # REPORTE AVANZADO: TOP PRODUCTOS
+        def mostrar_filtro_top_productos():
+            self.limpiar_contenido()
+            tk.Label(self.content_area, text="Reporte: Productos Más Vendidos", font=("Arial", 18)).pack(pady=10)
+            
+            frm_filtros = tk.LabelFrame(self.content_area, text="Filtro de Tiempo")
+            frm_filtros.pack(fill="x", padx=20, pady=5)
+            
+            tk.Label(frm_filtros, text="Período:").pack(side="left", padx=5)
+            cmb_periodo = ttk.Combobox(frm_filtros, values=["Total", "Personalizado"], width=12, state="readonly")
+            cmb_periodo.current(0)
+            cmb_periodo.pack(side="left", padx=5)
+            
+            entry_dias = tk.Entry(frm_filtros, width=5)
+            entry_dias.pack(side="left", padx=2)
+            entry_dias.config(state="disabled")
+            
+            tk.Label(frm_filtros, text="días atrás").pack(side="left")
+
+            def toggle_entry(event):
+                if cmb_periodo.get() == "Personalizado":
+                    entry_dias.config(state="normal"); entry_dias.focus()
+                else:
+                    entry_dias.delete(0, 'end'); entry_dias.config(state="disabled")
+
+            cmb_periodo.bind("<<ComboboxSelected>>", toggle_entry)
+            
+            self.tree_reportes = ttk.Treeview(self.content_area, columns=("Producto", "Unidades Vendidas"), show="headings")
+            self.tree_reportes.heading("Producto", text="Producto")
+            self.tree_reportes.heading("Unidades Vendidas", text="Unidades Vendidas")
+            self.tree_reportes.pack(fill="both", expand=True, padx=20, pady=10)
+            
+            def aplicar_filtro_top():
+                modo = cmb_periodo.get()
+                dias_valor = None
+                if modo == "Personalizado":
+                    d = entry_dias.get()
+                    if d and d.isdigit(): dias_valor = d
+                
+                cols, data = self.controller.ejecutar_consulta_reporte("Top Productos", dias_valor)
+                mostrar_datos_en_tabla(cols, data)
+
+            tk.Button(frm_filtros, text="Aplicar Filtros", bg="#2196F3", fg="white", command=aplicar_filtro_top).pack(side="left", padx=20)
+            tk.Button(self.content_area, text="< Volver al Menú Reportes", command=self.mostrar_reportes).pack(side="bottom", pady=10)
+            
+            aplicar_filtro_top()
+
         # Botón principal para ir al reporte avanzado
         ttk.Button(frm_btns, text="💰 Ventas Totales", command=mostrar_filtro_ventas).pack(side="left", padx=5)
+        ttk.Button(frm_btns, text="Más Vendidos", command=mostrar_filtro_top_productos).pack(side="left", padx=5)
 
     def importar_csv_productos(self):
         archivo_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
