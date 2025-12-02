@@ -152,7 +152,6 @@ class DatabaseManager:
             cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", 
                            ('vendedor', '1234', 'Vendedor'))
 
-        # LISTA DE CATEGORÍAS ACTUALIZADA (Versión Final)
         categorias = ['Camisetas', 'Pantalones', 'Accesorios', 'Calzado', 'Vestidos']
         for cat in categorias:
             cursor.execute("INSERT OR IGNORE INTO categorias (nombre) VALUES (?)", (cat,))
@@ -371,7 +370,6 @@ class Controller:
             data = cursor.fetchall()
             
         elif tipo_reporte == "Top Productos":
-            # Modificado para soportar filtro de días
             query = '''SELECT p.nombre, SUM(d.cantidad) as total_vendido 
                        FROM detalle_ventas d
                        JOIN productos p ON d.producto_id = p.id
@@ -675,9 +673,35 @@ class VistaPrincipal:
         
         cols = ("ID", "Nombre", "Talla", "Color", "Precio", "Stock", "Categoría", "Proveedor")
         tree = ttk.Treeview(self.content_area, columns=cols, show="headings")
-        for col in cols: tree.heading(col, text=col)
         tree.pack(fill="both", expand=True, padx=20, pady=10)
         
+        # --- Lógica de Ordenamiento ---
+        self.orden_actual = {"col": "ID", "reverse": False} # Por defecto ID Ascendente
+
+        def ordenar(col):
+            if self.orden_actual["col"] == col:
+                self.orden_actual["reverse"] = not self.orden_actual["reverse"]
+            else:
+                self.orden_actual["col"] = col
+                self.orden_actual["reverse"] = False
+            
+            # Actualizar encabezados visualmente
+            for c in cols:
+                tree.heading(c, text=c, command=lambda _col=c: ordenar(_col) if _col in ["ID", "Precio", "Stock"] else None)
+            
+            # Poner flecha
+            flecha = " ▼" if self.orden_actual["reverse"] else " ▲"
+            tree.heading(col, text=col + flecha, command=lambda: ordenar(col))
+            
+            cargar_datos()
+
+        # Configurar headers iniciales
+        for col in cols:
+            if col in ["ID", "Precio", "Stock"]:
+                tree.heading(col, text=col, command=lambda c=col: ordenar(c))
+            else:
+                tree.heading(col, text=col)
+
         def cargar_datos():
             for i in tree.get_children(): tree.delete(i)
             
@@ -685,7 +709,19 @@ class VistaPrincipal:
                 "nombre": txt_filtro_nombre.get(),
                 "categoria": cmb_filtro_cat.get()
             }
-            productos = self.controller.obtener_productos(filtros)
+            # Convertimos a lista para poder ordenar en Python
+            productos = list(self.controller.obtener_productos(filtros))
+            
+            # Aplicar ordenamiento
+            col_orden = self.orden_actual["col"]
+            reverso = self.orden_actual["reverse"]
+            
+            if col_orden == "ID":
+                productos.sort(key=lambda x: x[0], reverse=reverso)
+            elif col_orden == "Precio":
+                productos.sort(key=lambda x: float(x[4]), reverse=reverso)
+            elif col_orden == "Stock":
+                productos.sort(key=lambda x: int(x[7]), reverse=reverso)
             
             for p in productos:
                 try:
