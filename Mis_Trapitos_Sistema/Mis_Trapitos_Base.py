@@ -264,13 +264,12 @@ class Controller:
         conn.close()
         return data
 
-    # --- Proveedores (NUEVO) ---
-    def agregar_proveedor(self, nombre, direccion, telefono, email):
+    # --- Proveedores (ACTUALIZADO) ---
+    def agregar_proveedor(self, nombre, direccion, telefono, email, contacto="N/A"):
         conn = self.db.conectar()
         cursor = conn.cursor()
-        # Contacto lo dejamos vacío por ahora o genérico
         cursor.execute("INSERT INTO proveedores (nombre, direccion, telefono, email, contacto) VALUES (?, ?, ?, ?, ?)",
-                       (nombre, direccion, telefono, email, "N/A"))
+                       (nombre, direccion, telefono, email, contacto))
         conn.commit()
         conn.close()
 
@@ -509,7 +508,7 @@ class VistaPrincipal:
         ]
         
         if self.usuario[3] == "Administrador":
-            btns.append(("Proveedores", self.mostrar_proveedores)) # NUEVO BOTON
+            btns.append(("Proveedores", self.mostrar_proveedores))
             btns.append(("Promociones", self.mostrar_promociones))
             btns.append(("Reportes", self.mostrar_reportes))
             btns.append(("Importar Productos", self.importar_csv_productos))
@@ -815,129 +814,6 @@ class VistaPrincipal:
         btn_tarjeta = tk.Button(win_pago, text="💳 Tarjeta", font=("Arial", 12), bg="#2196F3", fg="white", 
                                 command=lambda: pagar("Tarjeta"), width=20)
         btn_tarjeta.pack(pady=5)
-
-    # ========================== VISTA: PROVEEDORES (NUEVO) ==========================
-    def mostrar_proveedores(self):
-        self.limpiar_contenido()
-        tk.Label(self.content_area, text="Gestión de Proveedores", font=("Arial", 18)).pack(pady=10)
-        
-        frm_btns = tk.Frame(self.content_area)
-        frm_btns.pack(fill="x", padx=20, pady=5)
-        
-        tk.Button(frm_btns, text="+ Nuevo Proveedor", command=self.popup_nuevo_proveedor, bg="#4CAF50", fg="white").pack(side="left", padx=5)
-        tk.Button(frm_btns, text="📦 Asignar Suministro", command=self.popup_asignar_suministro, bg="#FF9800", fg="white").pack(side="left", padx=5)
-        
-        # Tabla Proveedores
-        cols = ("ID", "Empresa", "Dirección", "Teléfono", "Email")
-        tree = ttk.Treeview(self.content_area, columns=cols, show="headings")
-        for c in cols: tree.heading(c, text=c)
-        
-        tree.column("ID", width=30)
-        tree.column("Empresa", width=150)
-        tree.column("Dirección", width=200)
-        tree.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        def cargar_provs():
-            for i in tree.get_children(): tree.delete(i)
-            # BD: id, nombre, contacto, telefono, email, direccion
-            for p in self.controller.obtener_proveedores():
-                tree.insert("", "end", values=(p[0], p[1], p[5], p[3], p[4]))
-        
-        cargar_provs()
-        self.loader_proveedores_ref = cargar_provs
-        self.tree_proveedores_ref = tree # Para obtener selección
-
-    def popup_nuevo_proveedor(self):
-        top = tk.Toplevel(self.root)
-        top.title("Registrar Proveedor")
-        top.geometry("400x350")
-        
-        tk.Label(top, text="Nombre Empresa:").pack(pady=5)
-        entry_nom = tk.Entry(top, width=40); entry_nom.pack()
-        
-        tk.Label(top, text="Dirección:").pack(pady=5)
-        entry_dir = tk.Entry(top, width=40); entry_dir.pack()
-        
-        tk.Label(top, text="Teléfono:").pack(pady=5)
-        entry_tel = tk.Entry(top, width=40); entry_tel.pack()
-        
-        tk.Label(top, text="Email:").pack(pady=5)
-        entry_email = tk.Entry(top, width=40); entry_email.pack()
-        
-        def guardar():
-            nom = entry_nom.get()
-            if nom:
-                self.controller.agregar_proveedor(nom, entry_dir.get(), entry_tel.get(), entry_email.get())
-                messagebox.showinfo("Éxito", "Proveedor registrado")
-                top.destroy()
-                self.loader_proveedores_ref()
-            else:
-                messagebox.showwarning("Error", "Nombre es obligatorio")
-        
-        tk.Button(top, text="Guardar", command=guardar, bg="#2196F3", fg="white").pack(pady=20)
-
-    def popup_asignar_suministro(self):
-        sel = self.tree_proveedores_ref.selection()
-        if not sel:
-            messagebox.showwarning("Aviso", "Seleccione un proveedor de la lista primero.")
-            return
-            
-        prov_data = self.tree_proveedores_ref.item(sel[0])['values']
-        prov_id = prov_data[0]
-        prov_nombre = prov_data[1]
-        
-        top = tk.Toplevel(self.root)
-        top.title(f"Suministro de: {prov_nombre}")
-        top.geometry("350x450")
-        
-        tk.Label(top, text="Categoría:").pack(pady=2)
-        cats = [f"{c[0]} - {c[1]}" for c in self.controller.obtener_categorias()]
-        cmb_cat = ttk.Combobox(top, values=cats, state="readonly")
-        cmb_cat.pack()
-        
-        tk.Label(top, text="Nombre Producto:").pack(pady=2)
-        entry_prod = tk.Entry(top); entry_prod.pack()
-        
-        tk.Label(top, text="Talla:").pack(pady=2)
-        entry_talla = tk.Entry(top); entry_talla.pack()
-        
-        tk.Label(top, text="Color:").pack(pady=2)
-        entry_color = tk.Entry(top); entry_color.pack()
-        
-        tk.Label(top, text="Precio Venta ($):").pack(pady=2)
-        entry_precio = tk.Entry(top); entry_precio.pack()
-        
-        tk.Label(top, text="Stock Inicial (Cantidad):").pack(pady=2)
-        entry_stock = tk.Entry(top); entry_stock.pack()
-        
-        def registrar_suministro():
-            try:
-                cat_str = cmb_cat.get()
-                if not cat_str: raise ValueError("Seleccione una categoría")
-                
-                cat_id = int(cat_str.split(" - ")[0])
-                nombre = entry_prod.get()
-                talla = entry_talla.get()
-                color = entry_color.get()
-                precio = float(entry_precio.get())
-                stock = int(entry_stock.get())
-                
-                if not nombre: raise ValueError("Falta el nombre del producto")
-                
-                self.controller.agregar_producto(
-                    nombre, "Suministro Nuevo", cat_id, precio, talla, color, stock, prov_id
-                )
-                
-                messagebox.showinfo("Éxito", "Producto agregado al inventario correctamente.")
-                top.destroy()
-                
-            except ValueError as ve:
-                messagebox.showwarning("Error", str(ve))
-            except Exception as e:
-                messagebox.showerror("Error Crítico", str(e))
-        
-        tk.Button(top, text="Registrar Entrada", command=registrar_suministro, bg="#4CAF50", fg="white").pack(pady=20)
-
 
     # ========================== VISTA: PROMOCIONES ==========================
     def mostrar_promociones(self):
@@ -1255,6 +1131,155 @@ class VistaPrincipal:
             self.loader_clientes_func()
         except Exception as e:
             messagebox.showerror("Error", f"Error al importar CSV Clientes: {e}")
+
+    # ========================== VISTA: PROVEEDORES (NUEVO) ==========================
+    def mostrar_proveedores(self):
+        self.limpiar_contenido()
+        tk.Label(self.content_area, text="Gestión de Proveedores", font=("Arial", 18)).pack(pady=10)
+        
+        frm_btns = tk.Frame(self.content_area)
+        frm_btns.pack(fill="x", padx=20, pady=5)
+        
+        tk.Button(frm_btns, text="+ Nuevo Proveedor", command=self.popup_nuevo_proveedor, bg="#4CAF50", fg="white").pack(side="left", padx=5)
+        tk.Button(frm_btns, text="📦 Asignar Suministro", command=self.popup_asignar_suministro, bg="#FF9800", fg="white").pack(side="left", padx=5)
+        # NUEVO BOTÓN
+        tk.Button(frm_btns, text="Importar CSV Proveedores", command=self.importar_csv_proveedores, bg="#607D8B", fg="white").pack(side="left", padx=5)
+        
+        # Tabla Proveedores
+        cols = ("ID", "Empresa", "Dirección", "Teléfono", "Email")
+        tree = ttk.Treeview(self.content_area, columns=cols, show="headings")
+        for c in cols: tree.heading(c, text=c)
+        
+        tree.column("ID", width=30)
+        tree.column("Empresa", width=150)
+        tree.column("Dirección", width=200)
+        tree.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        def cargar_provs():
+            for i in tree.get_children(): tree.delete(i)
+            # BD: id, nombre, contacto, telefono, email, direccion
+            for p in self.controller.obtener_proveedores():
+                tree.insert("", "end", values=(p[0], p[1], p[5], p[3], p[4]))
+        
+        cargar_provs()
+        self.loader_proveedores_ref = cargar_provs
+        self.tree_proveedores_ref = tree # Para obtener selección
+
+    def popup_nuevo_proveedor(self):
+        top = tk.Toplevel(self.root)
+        top.title("Registrar Proveedor")
+        top.geometry("400x350")
+        
+        tk.Label(top, text="Nombre Empresa:").pack(pady=5)
+        entry_nom = tk.Entry(top, width=40); entry_nom.pack()
+        
+        tk.Label(top, text="Dirección:").pack(pady=5)
+        entry_dir = tk.Entry(top, width=40); entry_dir.pack()
+        
+        tk.Label(top, text="Teléfono:").pack(pady=5)
+        entry_tel = tk.Entry(top, width=40); entry_tel.pack()
+        
+        tk.Label(top, text="Email:").pack(pady=5)
+        entry_email = tk.Entry(top, width=40); entry_email.pack()
+        
+        def guardar():
+            nom = entry_nom.get()
+            if nom:
+                self.controller.agregar_proveedor(nom, entry_dir.get(), entry_tel.get(), entry_email.get())
+                messagebox.showinfo("Éxito", "Proveedor registrado")
+                top.destroy()
+                self.loader_proveedores_ref()
+            else:
+                messagebox.showwarning("Error", "Nombre es obligatorio")
+        
+        tk.Button(top, text="Guardar", command=guardar, bg="#2196F3", fg="white").pack(pady=20)
+
+    def popup_asignar_suministro(self):
+        sel = self.tree_proveedores_ref.selection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Seleccione un proveedor de la lista primero.")
+            return
+            
+        prov_data = self.tree_proveedores_ref.item(sel[0])['values']
+        prov_id = prov_data[0]
+        prov_nombre = prov_data[1]
+        
+        top = tk.Toplevel(self.root)
+        top.title(f"Suministro de: {prov_nombre}")
+        top.geometry("350x450")
+        
+        tk.Label(top, text="Categoría:").pack(pady=2)
+        cats = [f"{c[0]} - {c[1]}" for c in self.controller.obtener_categorias()]
+        cmb_cat = ttk.Combobox(top, values=cats, state="readonly")
+        cmb_cat.pack()
+        
+        tk.Label(top, text="Nombre Producto:").pack(pady=2)
+        entry_prod = tk.Entry(top); entry_prod.pack()
+        
+        tk.Label(top, text="Talla:").pack(pady=2)
+        entry_talla = tk.Entry(top); entry_talla.pack()
+        
+        tk.Label(top, text="Color:").pack(pady=2)
+        entry_color = tk.Entry(top); entry_color.pack()
+        
+        tk.Label(top, text="Precio Venta ($):").pack(pady=2)
+        entry_precio = tk.Entry(top); entry_precio.pack()
+        
+        tk.Label(top, text="Stock Inicial (Cantidad):").pack(pady=2)
+        entry_stock = tk.Entry(top); entry_stock.pack()
+        
+        def registrar_suministro():
+            try:
+                cat_str = cmb_cat.get()
+                if not cat_str: raise ValueError("Seleccione una categoría")
+                
+                cat_id = int(cat_str.split(" - ")[0])
+                nombre = entry_prod.get()
+                talla = entry_talla.get()
+                color = entry_color.get()
+                precio = float(entry_precio.get())
+                stock = int(entry_stock.get())
+                
+                if not nombre: raise ValueError("Falta el nombre del producto")
+                
+                self.controller.agregar_producto(
+                    nombre, "Suministro Nuevo", cat_id, precio, talla, color, stock, prov_id
+                )
+                
+                messagebox.showinfo("Éxito", "Producto agregado al inventario correctamente.")
+                top.destroy()
+                
+            except ValueError as ve:
+                messagebox.showwarning("Error", str(ve))
+            except Exception as e:
+                messagebox.showerror("Error Crítico", str(e))
+        
+        tk.Button(top, text="Registrar Entrada", command=registrar_suministro, bg="#4CAF50", fg="white").pack(pady=20)
+
+    # NUEVO: Función para importar Proveedores desde CSV
+    def importar_csv_proveedores(self):
+        archivo_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
+        if not archivo_path:
+            return
+
+        try:
+            with open(archivo_path, newline='', encoding='utf-8') as archivo:
+                reader = csv.DictReader(archivo)
+                count = 0
+                for row in reader:
+                    # Intenta leer varias posibles columnas para ser flexible
+                    nom = row.get("Empresa", row.get("Nombre", "Proveedor Importado"))
+                    dire = row.get("Direccion", "")
+                    tel = row.get("Telefono", "")
+                    mail = row.get("Email", "")
+                    cont = row.get("Contacto", "N/A")
+                    
+                    self.controller.agregar_proveedor(nom, dire, tel, mail, cont)
+                    count += 1
+            messagebox.showinfo("Éxito", f"Se importaron {count} proveedores correctamente.")
+            self.loader_proveedores_ref()
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al importar CSV Proveedores: {e}")
 
     # ========================== VISTA: REPORTES ==========================
     def mostrar_reportes(self):
