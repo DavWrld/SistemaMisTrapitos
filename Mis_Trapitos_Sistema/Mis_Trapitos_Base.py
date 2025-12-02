@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
 import sqlite3
 import csv
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 # =============================================================================
 # CAPA DE DATOS (MODELO)
@@ -208,23 +208,19 @@ class Controller:
         conn.commit()
         conn.close()
 
-    # NUEVO: Reabastecimiento específico por ID de producto existente
     def reabastecer_producto(self, prod_id, cantidad, precio_nuevo):
         conn = self.db.conectar()
         cursor = conn.cursor()
         
-        # Obtener datos actuales
         cursor.execute("SELECT nombre, categoria_id, stock, proveedor_id FROM productos WHERE id=?", (prod_id,))
         prod = cursor.fetchone()
         if not prod: return
         
         nombre, cat_id, stock_actual, prov_id = prod
         
-        # Actualizar Producto
         nuevo_stock = stock_actual + cantidad
         cursor.execute("UPDATE productos SET stock = ?, precio = ? WHERE id = ?", (nuevo_stock, precio_nuevo, prod_id))
         
-        # Insertar en Historial Suministros
         fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute('''INSERT INTO suministros (fecha, proveedor_id, nombre_producto, categoria_id, cantidad, precio)
                           VALUES (?, ?, ?, ?, ?, ?)''',
@@ -249,7 +245,6 @@ class Controller:
             if filtro.get('categoria') and filtro['categoria'] != "Todas":
                 query += " AND c.nombre = ?"
                 params.append(filtro['categoria'])
-            # NUEVO FILTRO: Por Proveedor ID
             if filtro.get('proveedor_id'):
                 query += " AND p.proveedor_id = ?"
                 params.append(filtro['proveedor_id'])
@@ -323,6 +318,40 @@ class Controller:
                    JOIN productos p ON d.producto_id = p.id
                    WHERE d.venta_id = ?'''
         cursor.execute(query, (venta_id,))
+        data = cursor.fetchall()
+        conn.close()
+        return data
+
+    # --- NUEVO: REPORTE DE VENTAS CON FILTROS ---
+    def obtener_reporte_ventas(self, dias=None, metodo=None):
+        conn = self.db.conectar()
+        cursor = conn.cursor()
+        # Traemos: ID, Fecha, Cliente, Vendedor, Total, Metodo
+        query = '''SELECT v.id, v.fecha, v.cliente_nombre, u.username, v.total, v.metodo_pago 
+                   FROM ventas v 
+                   LEFT JOIN usuarios u ON v.usuario_id = u.id 
+                   WHERE 1=1'''
+        params = []
+        
+        # Filtro de Días
+        if dias and dias != "Todos":
+            try:
+                dias_int = int(dias)
+                # Si hoy es 2023-10-25 y pido 1 día, quiero desde 2023-10-24 00:00:00
+                fecha_limite = (datetime.now() - timedelta(days=dias_int)).strftime("%Y-%m-%d")
+                query += " AND v.fecha >= ?"
+                params.append(fecha_limite)
+            except ValueError:
+                pass # Si viene "Todos" o texto invalido, ignoramos
+            
+        # Filtro de Método de Pago
+        if metodo and metodo != "Todos":
+            query += " AND v.metodo_pago = ?"
+            params.append(metodo)
+            
+        query += " ORDER BY v.fecha DESC"
+        
+        cursor.execute(query, params)
         data = cursor.fetchall()
         conn.close()
         return data
@@ -843,13 +872,11 @@ class VistaPrincipal:
                 item = tree_cli.item(sel[0])['values']
                 cliente_id = item[0]
                 cliente_nombre = f"{item[1]} (ID: {cliente_id})"
-                # PASO 2: Elegir Método
                 self.popup_metodo_pago(top, cliente_nombre, cliente_id)
             else:
                 messagebox.showwarning("Aviso", "Seleccione un cliente de la lista")
 
         def publico_general():
-            # PASO 2: Elegir Método
             self.popup_metodo_pago(top, "Público General", None)
 
         frm_btns = tk.Frame(top)
@@ -858,11 +885,11 @@ class VistaPrincipal:
         tk.Button(frm_btns, text="Usar Público General", command=publico_general, bg="#777", fg="white").pack(side="left", padx=10)
         tk.Button(frm_btns, text="Seleccionar Cliente", command=confirmar_seleccion, bg="#2196F3", fg="white").pack(side="left", padx=10)
 
-    # NUEVO: Popup para método de pago
+    # NUEVO: Popup para método de pago CON TRANSFERENCIA
     def popup_metodo_pago(self, parent_window, nombre_cliente, cliente_id):
         win_pago = tk.Toplevel(self.root)
         win_pago.title("Método de Pago")
-        win_pago.geometry("300x200")
+        win_pago.geometry("350x300")
         
         tk.Label(win_pago, text=f"Cliente: {nombre_cliente}", font=("Arial", 10)).pack(pady=10)
         tk.Label(win_pago, text=f"Total: {self.total_var.get()}", font=("Arial", 12, "bold")).pack(pady=5)
@@ -875,7 +902,7 @@ class VistaPrincipal:
                     self.calculo_actual['items'], 
                     self.calculo_actual['total_final'],
                     cliente_id,
-                    metodo # Pasamos el método seleccionado
+                    metodo 
                 )
                 messagebox.showinfo("Éxito", f"Venta #{venta_id} registrada ({metodo})")
                 
@@ -883,27 +910,31 @@ class VistaPrincipal:
                 self.carrito_raw = []
                 self.calculo_actual = None
                 
-                # Reset UI principal
                 for i in self.tree_pos_cart_ref.get_children(): self.tree_pos_cart_ref.delete(i)
                 self.lbl_subtotal_ref.config(text="Subtotal: $0.00")
                 self.lbl_desc_global_ref.config(text="")
                 self.total_var_ref.set("Total: $0.00")
                 
-                self.mostrar_pos() # Recargar stocks
+                self.mostrar_pos() 
                 
                 win_pago.destroy()
-                parent_window.destroy() # Cierra también el selector de cliente
+                parent_window.destroy()
                 
             except Exception as e:
                 messagebox.showerror("Error", str(e))
         
-        btn_efectivo = tk.Button(win_pago, text="💵 Efectivo", font=("Arial", 12), bg="#4CAF50", fg="white", 
+        btn_efectivo = tk.Button(win_pago, text="💵 Efectivo", font=("Arial", 11), bg="#4CAF50", fg="white", 
                                  command=lambda: pagar("Efectivo"), width=20)
         btn_efectivo.pack(pady=5)
         
-        btn_tarjeta = tk.Button(win_pago, text="💳 Tarjeta", font=("Arial", 12), bg="#2196F3", fg="white", 
+        btn_tarjeta = tk.Button(win_pago, text="💳 Tarjeta", font=("Arial", 11), bg="#2196F3", fg="white", 
                                 command=lambda: pagar("Tarjeta"), width=20)
         btn_tarjeta.pack(pady=5)
+
+        # NUEVO BOTÓN
+        btn_transf = tk.Button(win_pago, text="🏦 Transferencia", font=("Arial", 11), bg="#9C27B0", fg="white", 
+                                command=lambda: pagar("Transferencia"), width=20)
+        btn_transf.pack(pady=5)
 
     # ========================== VISTA: PROMOCIONES ==========================
     def mostrar_promociones(self):
@@ -1143,7 +1174,6 @@ class VistaPrincipal:
                 messagebox.showinfo("Info", "Este cliente no tiene compras registradas.")
             
             for v in ventas:
-                # v tiene: id, fecha, total, username, metodo
                 metodo = v[4] if v[4] else "Desconocido"
                 tree_ventas.insert("", "end", values=(v[0], v[1], f"${v[2]:.2f}", v[3], metodo))
 
@@ -1222,7 +1252,7 @@ class VistaPrincipal:
         except Exception as e:
             messagebox.showerror("Error", f"Error al importar CSV Clientes: {e}")
 
-    # ========================== VISTA: PROVEEDORES (NUEVO) ==========================
+    # ========================== VISTA: PROVEEDORES ==========================
     def mostrar_proveedores(self):
         self.limpiar_contenido()
         tk.Label(self.content_area, text="Gestión de Proveedores", font=("Arial", 18)).pack(pady=10)
@@ -1232,25 +1262,22 @@ class VistaPrincipal:
         
         tk.Button(frm_btns, text="+ Nuevo Proveedor", command=self.popup_nuevo_proveedor, bg="#4CAF50", fg="white").pack(side="left", padx=5)
         tk.Button(frm_btns, text="📦 Asignar Suministro", command=self.popup_asignar_suministro, bg="#FF9800", fg="white").pack(side="left", padx=5)
-        # NUEVO BOTÓN: SELECCIONAR EXISTENTE
         tk.Button(frm_btns, text="🔄 Seleccionar Existente", command=self.popup_seleccionar_existente, bg="#009688", fg="white").pack(side="left", padx=5)
         tk.Button(frm_btns, text="Importar CSV Proveedores", command=self.importar_csv_proveedores, bg="#607D8B", fg="white").pack(side="left", padx=5)
         tk.Button(frm_btns, text="📜 Historial Suministros", command=self.popup_historial_suministros, bg="#2196F3", fg="white").pack(side="left", padx=5)
         
-        # Tabla Proveedores (COLUMNAS ACTUALIZADAS)
         cols = ("ID", "Empresa", "Suministra", "Dirección", "Teléfono")
         tree = ttk.Treeview(self.content_area, columns=cols, show="headings")
         for c in cols: tree.heading(c, text=c)
         
         tree.column("ID", width=30)
         tree.column("Empresa", width=150)
-        tree.column("Suministra", width=100) # Nueva columna
+        tree.column("Suministra", width=100)
         tree.column("Dirección", width=200)
         tree.pack(fill="both", expand=True, padx=20, pady=10)
         
         def cargar_provs():
             for i in tree.get_children(): tree.delete(i)
-            # BD: id, nombre, contacto, telefono, email, direccion, categoria_suministro
             for p in self.controller.obtener_proveedores():
                 cat = p[6] if len(p) > 6 else "General"
                 tree.insert("", "end", values=(p[0], p[1], cat, p[5], p[3]))
@@ -1261,13 +1288,11 @@ class VistaPrincipal:
 
     def popup_historial_suministros(self):
         sel = self.tree_proveedores_ref.selection()
-        # Si no selecciona ninguno, abrimos selector general
         
         top = tk.Toplevel(self.root)
         top.title("Historial de Suministros por Proveedor")
         top.geometry("700x500")
         
-        # --- SECCIÓN 1: SELECCIONAR PROVEEDOR ---
         frm_top = tk.Frame(top)
         frm_top.pack(fill="x", padx=10, pady=5)
         
@@ -1276,14 +1301,11 @@ class VistaPrincipal:
         lbl_prov_actual = tk.Label(frm_top, text="Ninguno", font=("Arial", 10, "bold"), fg="blue")
         lbl_prov_actual.pack(side="left", padx=10)
         
-        # Combo para cambiar proveedor rápido
         provs = self.controller.obtener_proveedores()
-        # Lista formato: "ID - Nombre"
         prov_list = [f"{p[0]} - {p[1]}" for p in provs]
         cmb_prov = ttk.Combobox(frm_top, values=prov_list, state="readonly", width=30)
         cmb_prov.pack(side="left", padx=10)
         
-        # Si veníamos de una selección en la tabla principal, pre-seleccionamos
         current_prov_id = None
         if sel:
             p_data = self.tree_proveedores_ref.item(sel[0])['values']
@@ -1293,7 +1315,6 @@ class VistaPrincipal:
                 lbl_prov_actual.config(text=p_data[1])
                 current_prov_id = p_data[0]
 
-        # --- SECCIÓN 2: FILTROS DE HISTORIAL ---
         frm_filter = tk.LabelFrame(top, text="Filtrar Historial")
         frm_filter.pack(fill="x", padx=10, pady=5)
         
@@ -1305,7 +1326,6 @@ class VistaPrincipal:
         btn_filter.pack(side="left", padx=5)
         entry_filter.bind("<Return>", lambda e: cargar_historial())
 
-        # --- SECCIÓN 3: TABLA ---
         cols = ("ID", "Fecha Entrada", "Producto", "Categoría", "Cant", "Costo Unit.")
         tree_hist = ttk.Treeview(top, columns=cols, show="headings")
         for c in cols: tree_hist.heading(c, text=c)
@@ -1328,22 +1348,15 @@ class VistaPrincipal:
             
             filtro = entry_filter.get()
             
-            # Limpiar
             for i in tree_hist.get_children(): tree_hist.delete(i)
             
-            # Cargar datos
             datos = self.controller.obtener_historial_suministros(p_id, filtro)
-            if not datos and not filtro:
-                pass 
-                
+            
             for d in datos:
-                # d: id, fecha, prod, cat_nom, cant, precio
                 tree_hist.insert("", "end", values=(d[0], d[1], d[2], d[3], d[4], f"${d[5]:.2f}"))
 
-        # Bind para recargar al cambiar combo
         cmb_prov.bind("<<ComboboxSelected>>", cargar_historial)
         
-        # Carga inicial si había selección
         if current_prov_id:
             cargar_historial()
 
@@ -1356,9 +1369,8 @@ class VistaPrincipal:
         entry_nom = tk.Entry(top, width=40); entry_nom.pack()
         
         tk.Label(top, text="Categoría Suministro:").pack(pady=5)
-        # Traemos las categorías del sistema para que coincidan
         cats = [c[1] for c in self.controller.obtener_categorias()]
-        cats.append("Varios") # Opción extra
+        cats.append("Varios") 
         cmb_cat = ttk.Combobox(top, values=cats, state="readonly", width=37)
         cmb_cat.current(0)
         cmb_cat.pack()
@@ -1447,7 +1459,6 @@ class VistaPrincipal:
         
         tk.Button(top, text="Registrar Entrada", command=registrar_suministro, bg="#4CAF50", fg="white").pack(pady=20)
 
-    # NUEVO: Popup para reabastecer producto existente
     def popup_seleccionar_existente(self):
         sel = self.tree_proveedores_ref.selection()
         if not sel:
@@ -1464,7 +1475,6 @@ class VistaPrincipal:
         
         tk.Label(top, text=f"Productos suministrados por {prov_nombre}", font=("Arial", 10, "bold")).pack(pady=10)
         
-        # Tabla de productos de este proveedor
         cols = ("ID", "Producto", "Talla", "Color", "Precio Actual", "Stock Actual")
         tree_prods = ttk.Treeview(top, columns=cols, show="headings")
         for c in cols: tree_prods.heading(c, text=c)
@@ -1478,7 +1488,6 @@ class VistaPrincipal:
         
         tree_prods.pack(fill="both", expand=True, padx=10, pady=5)
         
-        # Cargar productos filtrados por proveedor
         filtros = {'proveedor_id': prov_id}
         productos = self.controller.obtener_productos(filtros)
         
@@ -1486,7 +1495,6 @@ class VistaPrincipal:
             tk.Label(top, text="No hay productos registrados de este proveedor.", fg="red").pack()
         
         for p in productos:
-            # p: id, nombre, desc, catid, precio, talla, color, stock, provid, catnom, provnom
             tree_prods.insert("", "end", values=(p[0], p[1], p[5], p[6], f"${p[4]:.2f}", p[7]))
             
         def agregar_stock():
@@ -1498,11 +1506,9 @@ class VistaPrincipal:
             prod_nombre = item[1]
             precio_actual_str = item[4].replace("$", "")
             
-            # Pedir cantidad
             cant = simpledialog.askinteger("Reabastecer", f"Cantidad a agregar de:\n{prod_nombre}", parent=top, minvalue=1)
             if not cant: return
             
-            # Pedir precio (opcional, por si cambió el costo)
             precio_nuevo = simpledialog.askfloat("Precio", f"Precio unitario ($):", parent=top, initialvalue=float(precio_actual_str), minvalue=0)
             if precio_nuevo is None: return 
             
@@ -1515,7 +1521,6 @@ class VistaPrincipal:
 
         tk.Button(top, text="➕ Agregar Stock al Seleccionado", command=agregar_stock, bg="#009688", fg="white", font=("Arial", 11)).pack(pady=15)
 
-    # NUEVO: Función para importar Proveedores desde CSV con Categoria
     def importar_csv_proveedores(self):
         archivo_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
         if not archivo_path:
@@ -1546,21 +1551,86 @@ class VistaPrincipal:
         tk.Label(self.content_area, text="Reportes Gerenciales", font=("Arial", 18)).pack(pady=10)
         
         frm_btns = tk.Frame(self.content_area)
-        frm_btns.pack()
+        frm_btns.pack(pady=5)
         
-        tree = ttk.Treeview(self.content_area, show="headings")
-        tree.pack(fill="both", expand=True, padx=20, pady=10)
+        # Area para mostrar tabla
+        self.tree_reportes = ttk.Treeview(self.content_area, show="headings")
+        self.tree_reportes.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Etiqueta para totalizador
+        self.lbl_total_reporte = tk.Label(self.content_area, text="", font=("Arial", 14, "bold"), fg="blue")
+        self.lbl_total_reporte.pack(pady=10)
 
-        def ver(tipo):
+        # Función genérica para mostrar datos
+        def mostrar_datos_en_tabla(cols, data):
+            for i in self.tree_reportes.get_children(): self.tree_reportes.delete(i)
+            self.tree_reportes["columns"] = cols
+            for c in cols: self.tree_reportes.heading(c, text=c)
+            for d in data: self.tree_reportes.insert("", "end", values=d)
+            self.lbl_total_reporte.config(text="") # Limpiar total por defecto
+
+        # Reportes Simples
+        def ver_simple(tipo):
             cols, data = self.controller.ejecutar_consulta_reporte(tipo)
-            for i in tree.get_children(): tree.delete(i)
-            tree["columns"] = cols
-            for c in cols: tree.heading(c, text=c)
-            for d in data: tree.insert("", "end", values=d)
+            mostrar_datos_en_tabla(cols, data)
 
-        ttk.Button(frm_btns, text="Productos Bajo Stock", command=lambda: ver("Bajo Stock")).pack(side="left", padx=10)
-        ttk.Button(frm_btns, text="Ventas del Día", command=lambda: ver("Ventas del Dia")).pack(side="left", padx=10)
-        ttk.Button(frm_btns, text="Más Vendidos", command=lambda: ver("Top Productos")).pack(side="left", padx=10)
+        ttk.Button(frm_btns, text="Productos Bajo Stock", command=lambda: ver_simple("Bajo Stock")).pack(side="left", padx=5)
+        ttk.Button(frm_btns, text="Ventas del Día", command=lambda: ver_simple("Ventas del Dia")).pack(side="left", padx=5)
+        ttk.Button(frm_btns, text="Más Vendidos", command=lambda: ver_simple("Top Productos")).pack(side="left", padx=5)
+        
+        # REPORTE AVANZADO: VENTAS TOTALES
+        def mostrar_filtro_ventas():
+            self.limpiar_contenido()
+            tk.Label(self.content_area, text="Reporte de Ventas Totales", font=("Arial", 18)).pack(pady=10)
+            
+            frm_filtros = tk.LabelFrame(self.content_area, text="Filtros")
+            frm_filtros.pack(fill="x", padx=20, pady=5)
+            
+            tk.Label(frm_filtros, text="Período:").pack(side="left", padx=5)
+            cmb_dias = ttk.Combobox(frm_filtros, values=["Todos", "1", "7", "30", "90"], width=10, state="readonly")
+            cmb_dias.current(0)
+            cmb_dias.pack(side="left", padx=5)
+            tk.Label(frm_filtros, text="(días atrás)").pack(side="left")
+            
+            tk.Label(frm_filtros, text="Método Pago:").pack(side="left", padx=15)
+            cmb_metodo = ttk.Combobox(frm_filtros, values=["Todos", "Efectivo", "Tarjeta", "Transferencia"], width=15, state="readonly")
+            cmb_metodo.current(0)
+            cmb_metodo.pack(side="left", padx=5)
+            
+            # Tabla resultados
+            self.tree_reportes = ttk.Treeview(self.content_area, columns=("ID", "Fecha", "Cliente", "Vendedor", "Total", "Método"), show="headings")
+            for c in ("ID", "Fecha", "Cliente", "Vendedor", "Total", "Método"): self.tree_reportes.heading(c, text=c)
+            self.tree_reportes.pack(fill="both", expand=True, padx=20, pady=10)
+            
+            self.lbl_total_reporte = tk.Label(self.content_area, text="Total Ventas: $0.00", font=("Arial", 16, "bold"), fg="green")
+            self.lbl_total_reporte.pack(pady=10)
+            
+            def aplicar_filtro():
+                dias = cmb_dias.get()
+                metodo = cmb_metodo.get()
+                
+                datos = self.controller.obtener_reporte_ventas(dias, metodo)
+                
+                for i in self.tree_reportes.get_children(): self.tree_reportes.delete(i)
+                
+                suma_total = 0
+                for d in datos:
+                    # d: id, fecha, cliente, vendedor, total, metodo
+                    suma_total += d[4]
+                    met = d[5] if d[5] else "N/A"
+                    self.tree_reportes.insert("", "end", values=(d[0], d[1], d[2], d[3], f"${d[4]:.2f}", met))
+                
+                self.lbl_total_reporte.config(text=f"Total Filtrado: ${suma_total:.2f}")
+
+            tk.Button(frm_filtros, text="Aplicar Filtros", bg="#2196F3", fg="white", command=aplicar_filtro).pack(side="left", padx=20)
+            
+            # Botón Volver
+            tk.Button(self.content_area, text="< Volver al Menú Reportes", command=self.mostrar_reportes).pack(side="bottom", pady=10)
+            
+            aplicar_filtro() # Carga inicial
+
+        # Botón principal para ir al reporte avanzado
+        ttk.Button(frm_btns, text="💰 Ventas Totales", command=mostrar_filtro_ventas).pack(side="left", padx=5)
 
     def importar_csv_productos(self):
         archivo_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
