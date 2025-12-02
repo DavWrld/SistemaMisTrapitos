@@ -94,7 +94,6 @@ class DatabaseManager:
                             fecha_inicio TEXT,
                             fecha_fin TEXT)''')
         
-        # NUEVA TABLA: Historial de Suministros
         cursor.execute('''CREATE TABLE IF NOT EXISTS suministros (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             fecha TEXT NOT NULL,
@@ -128,7 +127,6 @@ class DatabaseManager:
             cursor.execute("UPDATE proveedores SET categoria_suministro = 'General' WHERE categoria_suministro IS NULL")
             conn.commit()
             
-        # Revisar si existe tabla suministros (por si acaso)
         cursor.execute('''CREATE TABLE IF NOT EXISTS suministros (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             fecha TEXT NOT NULL,
@@ -140,7 +138,6 @@ class DatabaseManager:
                             FOREIGN KEY(proveedor_id) REFERENCES proveedores(id),
                             FOREIGN KEY(categoria_id) REFERENCES categorias(id))''')
         
-        # Correcciones de nombres
         cursor.execute("UPDATE categorias SET nombre = 'Invierno' WHERE nombre = 'Zapatos'")
         cursor.execute("UPDATE categorias SET nombre = 'Calzado' WHERE nombre = 'Vestidos'")
         
@@ -187,16 +184,30 @@ class Controller:
         return usuario
 
     # --- Productos & Suministros ---
+    # ACTUALIZADO: Lógica de detección de duplicados
     def agregar_producto(self, nombre, desc, cat_id, precio, talla, color, stock, prov_id):
         conn = self.db.conectar()
         cursor = conn.cursor()
         
-        # 1. Insertar en Inventario Actual
-        cursor.execute('''INSERT INTO productos (nombre, descripcion, categoria_id, precio, talla, color, stock, proveedor_id)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', 
-                          (nombre, desc, cat_id, precio, talla, color, stock, prov_id))
+        # 1. VERIFICAR EXISTENCIA
+        # Buscamos si ya existe un producto idéntico (Nombre, Talla, Color, Proveedor)
+        cursor.execute("SELECT id, stock FROM productos WHERE nombre=? AND talla=? AND color=? AND proveedor_id=?", 
+                       (nombre, talla, color, prov_id))
+        producto_existente = cursor.fetchone()
         
-        # 2. Registrar en Historial de Suministros (NUEVO)
+        if producto_existente:
+            # SI EXISTE: Actualizamos el stock sumando lo nuevo
+            prod_id = producto_existente[0]
+            nuevo_stock = producto_existente[1] + stock
+            cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (nuevo_stock, prod_id))
+            # Opcional: Podríamos actualizar el precio si cambió, pero por ahora conservamos el stock
+        else:
+            # NO EXISTE: Insertamos nuevo registro
+            cursor.execute('''INSERT INTO productos (nombre, descripcion, categoria_id, precio, talla, color, stock, proveedor_id)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', 
+                              (nombre, desc, cat_id, precio, talla, color, stock, prov_id))
+        
+        # 2. Registrar SIEMPRE en Historial de Suministros (Auditoría)
         fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute('''INSERT INTO suministros (fecha, proveedor_id, nombre_producto, categoria_id, cantidad, precio)
                           VALUES (?, ?, ?, ?, ?, ?)''',
@@ -237,7 +248,6 @@ class Controller:
         params = [proveedor_id]
         
         if filtro_texto:
-            # Filtrar por fecha o nombre producto
             query += " AND (s.fecha LIKE ? OR s.nombre_producto LIKE ?)"
             params.append(f"%{filtro_texto}%")
             params.append(f"%{filtro_texto}%")
@@ -1302,7 +1312,6 @@ class VistaPrincipal:
             # Cargar datos
             datos = self.controller.obtener_historial_suministros(p_id, filtro)
             if not datos and not filtro:
-                # Si no hay datos y no es por filtro
                 pass 
                 
             for d in datos:
@@ -1406,7 +1415,7 @@ class VistaPrincipal:
                     nombre, "Suministro Nuevo", cat_id, precio, talla, color, stock, prov_id
                 )
                 
-                messagebox.showinfo("Éxito", "Producto agregado al inventario correctamente.")
+                messagebox.showinfo("Éxito", "Producto agregado/actualizado al inventario correctamente.")
                 top.destroy()
                 
             except ValueError as ve:
