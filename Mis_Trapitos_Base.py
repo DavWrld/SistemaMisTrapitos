@@ -54,14 +54,15 @@ class DatabaseManager:
                             FOREIGN KEY(categoria_id) REFERENCES categorias(id),
                             FOREIGN KEY(proveedor_id) REFERENCES proveedores(id))''')
 
-        # NOTA: Se agrega cliente_id para vincular historial
+        # NOTA: Se agrega metodo_pago
         cursor.execute('''CREATE TABLE IF NOT EXISTS ventas (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             fecha TEXT NOT NULL,
                             cliente_nombre TEXT,
                             total REAL,
                             usuario_id INTEGER,
-                            cliente_id INTEGER, 
+                            cliente_id INTEGER,
+                            metodo_pago TEXT, 
                             FOREIGN KEY(usuario_id) REFERENCES usuarios(id),
                             FOREIGN KEY(cliente_id) REFERENCES clientes(id))''')
 
@@ -100,18 +101,25 @@ class DatabaseManager:
         conn = self.conectar()
         cursor = conn.cursor()
         
-        # 1. Revisar columna direccion en clientes
+        # 1. Revisar direccion en clientes
         try:
             cursor.execute("SELECT direccion FROM clientes LIMIT 1")
         except sqlite3.OperationalError:
             cursor.execute("ALTER TABLE clientes ADD COLUMN direccion TEXT")
             conn.commit()
             
-        # 2. Revisar columna cliente_id en ventas (NUEVO PARA HISTORIAL)
+        # 2. Revisar cliente_id en ventas
         try:
             cursor.execute("SELECT cliente_id FROM ventas LIMIT 1")
         except sqlite3.OperationalError:
             cursor.execute("ALTER TABLE ventas ADD COLUMN cliente_id INTEGER")
+            conn.commit()
+
+        # 3. Revisar metodo_pago en ventas (NUEVO)
+        try:
+            cursor.execute("SELECT metodo_pago FROM ventas LIMIT 1")
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE ventas ADD COLUMN metodo_pago TEXT")
             conn.commit()
             
         conn.close()
@@ -188,15 +196,16 @@ class Controller:
         return data
 
     # --- Ventas ---
-    def registrar_venta(self, usuario_id, cliente_nombre, items_venta, total_final, cliente_id=None):
+    # Actualizado para recibir metodo_pago
+    def registrar_venta(self, usuario_id, cliente_nombre, items_venta, total_final, cliente_id=None, metodo_pago="Efectivo"):
         conn = self.db.conectar()
         cursor = conn.cursor()
         
         fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Insertamos también el cliente_id si existe
-        cursor.execute("INSERT INTO ventas (fecha, cliente_nombre, total, usuario_id, cliente_id) VALUES (?, ?, ?, ?, ?)",
-                       (fecha, cliente_nombre, total_final, usuario_id, cliente_id))
+        cursor.execute('''INSERT INTO ventas (fecha, cliente_nombre, total, usuario_id, cliente_id, metodo_pago) 
+                          VALUES (?, ?, ?, ?, ?, ?)''',
+                       (fecha, cliente_nombre, total_final, usuario_id, cliente_id, metodo_pago))
         venta_id = cursor.lastrowid
         
         for item in items_venta:
@@ -209,12 +218,10 @@ class Controller:
         conn.close()
         return venta_id
 
-    # NUEVO: Obtener historial de ventas de un cliente
     def obtener_ventas_por_cliente(self, cliente_id):
         conn = self.db.conectar()
         cursor = conn.cursor()
-        # Traemos fecha, total y el usuario que vendió
-        query = '''SELECT v.id, v.fecha, v.total, u.username 
+        query = '''SELECT v.id, v.fecha, v.total, u.username, v.metodo_pago
                    FROM ventas v
                    LEFT JOIN usuarios u ON v.usuario_id = u.id
                    WHERE v.cliente_id = ?
@@ -224,7 +231,6 @@ class Controller:
         conn.close()
         return data
 
-    # NUEVO: Obtener detalle de una venta específica para el historial
     def obtener_detalle_venta(self, venta_id):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -408,6 +414,8 @@ class Controller:
             
         elif tipo_reporte == "Ventas del Dia":
             hoy = date.today().strftime("%Y-%m-%d")
+            # Ajustado para ver metodo pago si existe
+            # Ojo: si la consulta es simple, puede que no salga el pago, pero no falla
             cursor.execute('''SELECT v.id, v.fecha, v.cliente_nombre, v.total, u.username 
                               FROM ventas v 
                               JOIN usuarios u ON v.usuario_id = u.id 
@@ -732,48 +740,69 @@ class VistaPrincipal:
             sel = tree_cli.selection()
             if sel:
                 item = tree_cli.item(sel[0])['values']
-                # Guardamos ID y nombre
                 cliente_id = item[0]
                 cliente_nombre = f"{item[1]} (ID: {cliente_id})"
-                procesar_pago(cliente_nombre, cliente_id)
-                top.destroy()
+                # PASO 2: Elegir Método
+                self.popup_metodo_pago(top, cliente_nombre, cliente_id)
             else:
                 messagebox.showwarning("Aviso", "Seleccione un cliente de la lista")
 
         def publico_general():
-            procesar_pago("Público General", None)
-            top.destroy()
-
-        def procesar_pago(nombre_cliente, cliente_id):
-            try:
-                # Actualizado para pasar cliente_id
-                venta_id = self.controller.registrar_venta(
-                    self.usuario[0], 
-                    nombre_cliente, 
-                    self.calculo_actual['items'], 
-                    self.calculo_actual['total_final'],
-                    cliente_id
-                )
-                messagebox.showinfo("Éxito", f"Venta #{venta_id} registrada con éxito para: {nombre_cliente}")
-                self.carrito_raw = []
-                self.calculo_actual = None
-                
-                # Recargar UI
-                for i in self.tree_pos_cart_ref.get_children(): self.tree_pos_cart_ref.delete(i)
-                self.lbl_subtotal_ref.config(text="Subtotal: $0.00")
-                self.lbl_desc_global_ref.config(text="")
-                self.total_var_ref.set("Total: $0.00")
-                
-                self.mostrar_pos()
-                
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
+            # PASO 2: Elegir Método
+            self.popup_metodo_pago(top, "Público General", None)
 
         frm_btns = tk.Frame(top)
         frm_btns.pack(pady=10)
         
         tk.Button(frm_btns, text="Usar Público General", command=publico_general, bg="#777", fg="white").pack(side="left", padx=10)
         tk.Button(frm_btns, text="Seleccionar Cliente", command=confirmar_seleccion, bg="#2196F3", fg="white").pack(side="left", padx=10)
+
+    # NUEVO: Popup para método de pago
+    def popup_metodo_pago(self, parent_window, nombre_cliente, cliente_id):
+        win_pago = tk.Toplevel(self.root)
+        win_pago.title("Método de Pago")
+        win_pago.geometry("300x200")
+        
+        tk.Label(win_pago, text=f"Cliente: {nombre_cliente}", font=("Arial", 10)).pack(pady=10)
+        tk.Label(win_pago, text=f"Total: {self.total_var.get()}", font=("Arial", 12, "bold")).pack(pady=5)
+        
+        def pagar(metodo):
+            try:
+                venta_id = self.controller.registrar_venta(
+                    self.usuario[0], 
+                    nombre_cliente, 
+                    self.calculo_actual['items'], 
+                    self.calculo_actual['total_final'],
+                    cliente_id,
+                    metodo # Pasamos el método seleccionado
+                )
+                messagebox.showinfo("Éxito", f"Venta #{venta_id} registrada ({metodo})")
+                
+                # Limpieza
+                self.carrito_raw = []
+                self.calculo_actual = None
+                
+                # Reset UI principal
+                for i in self.tree_pos_cart_ref.get_children(): self.tree_pos_cart_ref.delete(i)
+                self.lbl_subtotal_ref.config(text="Subtotal: $0.00")
+                self.lbl_desc_global_ref.config(text="")
+                self.total_var_ref.set("Total: $0.00")
+                
+                self.mostrar_pos() # Recargar stocks
+                
+                win_pago.destroy()
+                parent_window.destroy() # Cierra también el selector de cliente
+                
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+        
+        btn_efectivo = tk.Button(win_pago, text="💵 Efectivo", font=("Arial", 12), bg="#4CAF50", fg="white", 
+                                 command=lambda: pagar("Efectivo"), width=20)
+        btn_efectivo.pack(pady=5)
+        
+        btn_tarjeta = tk.Button(win_pago, text="💳 Tarjeta", font=("Arial", 12), bg="#2196F3", fg="white", 
+                                command=lambda: pagar("Tarjeta"), width=20)
+        btn_tarjeta.pack(pady=5)
 
     # ========================== VISTA: PROMOCIONES ==========================
     def mostrar_promociones(self):
@@ -922,7 +951,6 @@ class VistaPrincipal:
         tk.Button(frm_botones, text="+ Nuevo Cliente", command=self.popup_nuevo_cliente, 
                   bg="#4CAF50", fg="white").pack(side="left", padx=5)
 
-        # NUEVO BOTÓN DE HISTORIAL
         tk.Button(frm_botones, text="📜 Historial de Compras", command=self.popup_historial_cliente, 
                   bg="#2196F3", fg="white").pack(side="left", padx=5)
         
@@ -948,13 +976,11 @@ class VistaPrincipal:
         load_cli()
         self.loader_clientes_func = load_cli
 
-    # NUEVO: Popup para buscar cliente y ver historial
     def popup_historial_cliente(self):
         top = tk.Toplevel(self.root)
         top.title("Historial de Compras por Cliente")
         top.geometry("700x500")
         
-        # --- SECCIÓN 1: BUSCADOR ---
         tk.Label(top, text="Buscar Cliente (ID o Nombre):").pack(pady=5)
         
         frm_search = tk.Frame(top)
@@ -963,7 +989,6 @@ class VistaPrincipal:
         entry_search = tk.Entry(frm_search)
         entry_search.pack(side="left", fill="x", expand=True)
         
-        # Tabla resultados de búsqueda
         cols = ("ID", "Nombre", "Email")
         tree_cli = ttk.Treeview(top, columns=cols, show="headings", height=5)
         tree_cli.heading("ID", text="ID"); tree_cli.column("ID", width=50)
@@ -984,17 +1009,14 @@ class VistaPrincipal:
         tk.Button(frm_search, text="Buscar", command=buscar_clientes).pack(side="left", padx=5)
         entry_search.bind("<Return>", buscar_clientes)
         
-        # --- SECCIÓN 2: HISTORIAL DE VENTAS ---
         lbl_historial = tk.Label(top, text="Historial de Ventas:", font=("Arial", 12, "bold"))
         lbl_historial.pack(pady=10)
         
-        # Tabla de Ventas
-        cols_v = ("ID Venta", "Fecha", "Total", "Vendedor")
+        cols_v = ("ID Venta", "Fecha", "Total", "Vendedor", "Método")
         tree_ventas = ttk.Treeview(top, columns=cols_v, show="headings", height=6)
         for c in cols_v: tree_ventas.heading(c, text=c)
         tree_ventas.pack(fill="x", padx=10)
 
-        # --- SECCIÓN 3: DETALLE DE PRODUCTOS ---
         lbl_detalle = tk.Label(top, text="Detalle de Productos (Selecciona una venta):", font=("Arial", 10))
         lbl_detalle.pack(pady=5)
         
@@ -1012,17 +1034,17 @@ class VistaPrincipal:
             
             lbl_historial.config(text=f"Historial de: {cliente_nom}")
             
-            # Limpiar tablas inferiores
             for i in tree_ventas.get_children(): tree_ventas.delete(i)
             for i in tree_det.get_children(): tree_det.delete(i)
             
-            # Cargar ventas
             ventas = self.controller.obtener_ventas_por_cliente(cliente_id)
             if not ventas:
                 messagebox.showinfo("Info", "Este cliente no tiene compras registradas.")
             
             for v in ventas:
-                tree_ventas.insert("", "end", values=(v[0], v[1], f"${v[2]:.2f}", v[3]))
+                # v tiene: id, fecha, total, username, metodo
+                metodo = v[4] if v[4] else "Desconocido"
+                tree_ventas.insert("", "end", values=(v[0], v[1], f"${v[2]:.2f}", v[3], metodo))
 
         def mostrar_detalle_venta(event):
             sel = tree_ventas.selection()
@@ -1030,19 +1052,16 @@ class VistaPrincipal:
             item = tree_ventas.item(sel[0])['values']
             venta_id = item[0]
             
-            # Limpiar detalle
             for i in tree_det.get_children(): tree_det.delete(i)
             
-            # Cargar productos
             detalles = self.controller.obtener_detalle_venta(venta_id)
             for d in detalles:
                 tree_det.insert("", "end", values=(d[0], d[1], f"${d[2]:.2f}", f"${d[3]:.2f}"))
 
-        # Bindings
         tree_cli.bind("<<TreeviewSelect>>", mostrar_historial_seleccionado)
         tree_ventas.bind("<<TreeviewSelect>>", mostrar_detalle_venta)
         
-        buscar_clientes() # Carga inicial todos
+        buscar_clientes()
 
     def popup_nuevo_cliente(self):
         top = tk.Toplevel(self.root)
