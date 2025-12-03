@@ -114,17 +114,22 @@ class DatabaseManager:
     def actualizar_schema(self):
         conn = self.conectar()
         cursor = conn.cursor()
+        
         try: cursor.execute("SELECT direccion FROM clientes LIMIT 1")
         except: cursor.execute("ALTER TABLE clientes ADD COLUMN direccion TEXT"); conn.commit()
+            
         try: cursor.execute("SELECT cliente_id FROM ventas LIMIT 1")
         except: cursor.execute("ALTER TABLE ventas ADD COLUMN cliente_id INTEGER"); conn.commit()
+
         try: cursor.execute("SELECT metodo_pago FROM ventas LIMIT 1")
         except: cursor.execute("ALTER TABLE ventas ADD COLUMN metodo_pago TEXT"); conn.commit()
+
         try: cursor.execute("SELECT categoria_suministro FROM proveedores LIMIT 1")
         except: 
             cursor.execute("ALTER TABLE proveedores ADD COLUMN categoria_suministro TEXT")
             cursor.execute("UPDATE proveedores SET categoria_suministro = 'General' WHERE categoria_suministro IS NULL")
             conn.commit()
+            
         cursor.execute('''CREATE TABLE IF NOT EXISTS suministros (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             fecha TEXT NOT NULL,
@@ -135,25 +140,30 @@ class DatabaseManager:
                             precio REAL,
                             FOREIGN KEY(proveedor_id) REFERENCES proveedores(id),
                             FOREIGN KEY(categoria_id) REFERENCES categorias(id))''')
+        
         conn.commit()    
         conn.close()
 
     def sembrar_datos_iniciales(self):
         conn = self.conectar()
         cursor = conn.cursor()
+        
         cursor.execute("SELECT * FROM usuarios WHERE username='admin'")
         if not cursor.fetchone():
             cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", 
                            ('admin', 'admin123', 'Administrador'))
             cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", 
                            ('vendedor', '1234', 'Vendedor'))
+
         categorias = ['Camisetas', 'Pantalones', 'Accesorios', 'Calzado', 'Vestidos']
         for cat in categorias:
             cursor.execute("INSERT OR IGNORE INTO categorias (nombre) VALUES (?)", (cat,))
+        
         cursor.execute("SELECT * FROM proveedores")
         if not cursor.fetchone():
             cursor.execute("INSERT INTO proveedores (nombre, contacto, telefono, categoria_suministro) VALUES (?,?,?,?)",
                            ("Proveedor General", "Juan Perez", "555-0000", "General"))
+
         conn.commit()
         conn.close()
 
@@ -173,12 +183,15 @@ class Controller:
         conn.close()
         return usuario
 
+    # --- Productos & Suministros ---
     def agregar_producto(self, nombre, desc, cat_id, precio, talla, color, stock, prov_id):
         conn = self.db.conectar()
         cursor = conn.cursor()
+        
         cursor.execute("SELECT id, stock FROM productos WHERE nombre=? AND talla=? AND color=? AND proveedor_id=?", 
                        (nombre, talla, color, prov_id))
         producto_existente = cursor.fetchone()
+        
         if producto_existente:
             prod_id = producto_existente[0]
             nuevo_stock = producto_existente[1] + stock
@@ -187,26 +200,33 @@ class Controller:
             cursor.execute('''INSERT INTO productos (nombre, descripcion, categoria_id, precio, talla, color, stock, proveedor_id)
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', 
                               (nombre, desc, cat_id, precio, talla, color, stock, prov_id))
+        
         fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute('''INSERT INTO suministros (fecha, proveedor_id, nombre_producto, categoria_id, cantidad, precio)
                           VALUES (?, ?, ?, ?, ?, ?)''',
                           (fecha_actual, prov_id, nombre, cat_id, stock, precio))
+        
         conn.commit()
         conn.close()
 
     def reabastecer_producto(self, prod_id, cantidad, precio_nuevo):
         conn = self.db.conectar()
         cursor = conn.cursor()
+        
         cursor.execute("SELECT nombre, categoria_id, stock, proveedor_id FROM productos WHERE id=?", (prod_id,))
         prod = cursor.fetchone()
         if not prod: return
+        
         nombre, cat_id, stock_actual, prov_id = prod
+        
         nuevo_stock = stock_actual + cantidad
         cursor.execute("UPDATE productos SET stock = ?, precio = ? WHERE id = ?", (nuevo_stock, precio_nuevo, prod_id))
+        
         fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute('''INSERT INTO suministros (fecha, proveedor_id, nombre_producto, categoria_id, cantidad, precio)
                           VALUES (?, ?, ?, ?, ?, ?)''',
                           (fecha_actual, prov_id, nombre, cat_id, cantidad, precio_nuevo))
+        
         conn.commit()
         conn.close()
 
@@ -232,10 +252,25 @@ class Controller:
             if filtro.get('proveedor') and filtro['proveedor'] != "Todos":
                 query += " AND pr.nombre = ?"
                 params.append(filtro['proveedor'])
+        
         cursor.execute(query, params)
         data = cursor.fetchall()
         conn.close()
         return data
+    
+    # NUEVO: Eliminar Producto
+    def eliminar_producto(self, prod_id):
+        conn = self.db.conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM productos WHERE id = ?", (prod_id,))
+            conn.commit()
+            filas_afectadas = cursor.rowcount
+            conn.close()
+            return filas_afectadas > 0
+        except sqlite3.Error:
+            conn.close()
+            return False
 
     def obtener_historial_suministros(self, proveedor_id, filtro_texto=None):
         conn = self.db.conectar()
@@ -245,29 +280,37 @@ class Controller:
                    LEFT JOIN categorias c ON s.categoria_id = c.id
                    WHERE s.proveedor_id = ?'''
         params = [proveedor_id]
+        
         if filtro_texto:
             query += " AND (s.fecha LIKE ? OR s.nombre_producto LIKE ?)"
             params.append(f"%{filtro_texto}%")
             params.append(f"%{filtro_texto}%")
+            
         query += " ORDER BY s.fecha DESC"
+        
         cursor.execute(query, params)
         data = cursor.fetchall()
         conn.close()
         return data
 
+    # --- Ventas ---
     def registrar_venta(self, usuario_id, cliente_nombre, items_venta, total_final, cliente_id=None, metodo_pago="Efectivo"):
         conn = self.db.conectar()
         cursor = conn.cursor()
+        
         fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
         cursor.execute('''INSERT INTO ventas (fecha, cliente_nombre, total, usuario_id, cliente_id, metodo_pago) 
                           VALUES (?, ?, ?, ?, ?, ?)''',
                        (fecha, cliente_nombre, total_final, usuario_id, cliente_id, metodo_pago))
         venta_id = cursor.lastrowid
+        
         for item in items_venta:
             cursor.execute('''INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, subtotal)
                               VALUES (?, ?, ?, ?, ?)''',
                               (venta_id, item['id'], item['cantidad'], item['precio_unitario_real'], item['subtotal_final']))
             cursor.execute("UPDATE productos SET stock = stock - ? WHERE id = ?", (item['cantidad'], item['id']))
+            
         conn.commit()
         conn.close()
         return venta_id
@@ -297,6 +340,7 @@ class Controller:
         conn.close()
         return data
 
+    # --- REPORTES AVANZADOS ---
     def obtener_reporte_ventas(self, dias=None, metodo=None):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -305,6 +349,7 @@ class Controller:
                    LEFT JOIN usuarios u ON v.usuario_id = u.id 
                    WHERE 1=1'''
         params = []
+        
         if dias and dias != "Todos":
             try:
                 dias_int = int(dias)
@@ -312,24 +357,29 @@ class Controller:
                 query += " AND v.fecha >= ?"
                 params.append(fecha_limite)
             except ValueError: pass
+            
         if metodo and metodo != "Todos":
             query += " AND v.metodo_pago = ?"
             params.append(metodo)
+            
         query += " ORDER BY v.fecha DESC"
+        
         cursor.execute(query, params)
         data = cursor.fetchall()
         conn.close()
         return data
 
-    def ejecutar_consulta_reporte(self, tipo_reporte, dias=None):
+    def ejecutar_consulta_reporte(self, tipo_reporte, dias=None, categoria=None):
         conn = self.db.conectar()
         cursor = conn.cursor()
         columnas = []
         data = []
+        
         if tipo_reporte == "Bajo Stock":
             cursor.execute("SELECT nombre, stock, stock_minimo FROM productos WHERE stock <= stock_minimo")
             columnas = ["Producto", "Stock Actual", "Mínimo"]
             data = cursor.fetchall()
+            
         elif tipo_reporte == "Ventas del Dia":
             hoy = date.today().strftime("%Y-%m-%d")
             cursor.execute('''SELECT v.id, v.fecha, v.cliente_nombre, v.total, u.username 
@@ -338,33 +388,46 @@ class Controller:
                               WHERE v.fecha LIKE ?''', (f"{hoy}%",))
             columnas = ["ID Venta", "Fecha", "Cliente", "Total", "Vendedor"]
             data = cursor.fetchall()
+            
         elif tipo_reporte == "Top Productos":
-            subquery_ventas = "SELECT id FROM ventas WHERE 1=1"
-            params_sub = []
+            subquery_sales = """
+                SELECT SUM(d.cantidad) 
+                FROM detalle_ventas d 
+                JOIN ventas v ON d.venta_id = v.id 
+                WHERE d.producto_id = p.id
+            """
+            params = []
+            
             if dias and dias != "Total":
                 try:
                     dias_int = int(dias)
                     fecha_limite = (datetime.now() - timedelta(days=dias_int)).strftime("%Y-%m-%d")
-                    subquery_ventas += " AND fecha >= ?"
-                    params_sub.append(fecha_limite)
+                    subquery_sales += " AND v.fecha >= ?"
+                    params.append(fecha_limite)
                 except ValueError: pass
-            query_clean = f'''
+            
+            query = f'''
                 SELECT p.nombre, 
-                       COALESCE((SELECT SUM(d.cantidad) 
-                                 FROM detalle_ventas d 
-                                 JOIN ventas v ON d.venta_id = v.id 
-                                 WHERE d.producto_id = p.id 
-                                 { "AND v.fecha >= ?" if params_sub else "" }
-                                ), 0) as total_vendido
+                       COALESCE(({subquery_sales}), 0) as total_vendido
                 FROM productos p
-                ORDER BY total_vendido DESC
+                LEFT JOIN categorias c ON p.categoria_id = c.id
+                WHERE 1=1
             '''
-            cursor.execute(query_clean, params_sub)
+            
+            if categoria and categoria != "Todas":
+                query += " AND c.nombre = ?"
+                params.append(categoria)
+                
+            query += " ORDER BY total_vendido DESC"
+            
+            cursor.execute(query, params)
             columnas = ["Producto", "Unidades Vendidas"]
             data = cursor.fetchall()
+
         conn.close()
         return columnas, data
 
+    # --- Clientes ---
     def agregar_cliente(self, nombre, direccion, telefono, email):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -376,17 +439,21 @@ class Controller:
     def obtener_clientes(self, busqueda=None):
         conn = self.db.conectar()
         cursor = conn.cursor()
+        
         query = "SELECT * FROM clientes WHERE 1=1"
         params = []
+        
         if busqueda:
             query += " AND (nombre LIKE ? OR id LIKE ?)"
             params.append(f"%{busqueda}%")
             params.append(f"{busqueda}%")
+            
         cursor.execute(query, params)
         data = cursor.fetchall()
         conn.close()
         return data
 
+    # --- Proveedores ---
     def agregar_proveedor(self, nombre, direccion, telefono, email, contacto="N/A", categoria_suministro="General"):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -404,6 +471,7 @@ class Controller:
         conn.close()
         return data
 
+    # --- Promociones ---
     def agregar_promocion(self, nombre, tipo_ent, ent_id, tipo_desc, v1, v2, f_inicio, f_fin):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -438,30 +506,38 @@ class Controller:
         conn.commit()
         conn.close()
 
+    # --- MOTOR DE CÁLCULO ---
     def calcular_carrito_con_descuentos(self, carrito):
         promos = self.obtener_promociones_activas()
+        
         subtotal_bruto = 0
         total_neto = 0
         items_procesados = []
+        
         for item in carrito:
             pid = item['id']
             p_cat = item['cat_id']
             cant = item['cantidad']
             precio = item['precio_base']
+            
             subtotal_bruto += (cant * precio)
+            
             mejor_descuento = 0
             tipo_aplicado = ""
+            
             for prom in promos:
                 p_tipo_ent = prom[2]
                 p_ent_id = prom[3]
                 p_tipo_desc = prom[4]
                 v1 = prom[5]
                 v2 = prom[6]
+                
                 aplica = False
                 if p_tipo_ent == "Producto" and p_ent_id == pid:
                     aplica = True
                 elif p_tipo_ent == "Categoria" and p_ent_id == p_cat:
                     aplica = True
+                
                 if aplica:
                     desc_calculado = 0
                     if p_tipo_desc == "Porcentaje":
@@ -476,9 +552,11 @@ class Controller:
                         total_linea_sin_desc = cant * precio
                         total_linea_con_desc = pagar * precio
                         desc_calculado = total_linea_sin_desc - total_linea_con_desc
+                    
                     if desc_calculado > mejor_descuento:
                         mejor_descuento = desc_calculado
                         tipo_aplicado = prom[1]
+
             subtotal_linea_final = (cant * precio) - mejor_descuento
             items_procesados.append({
                 'id': pid,
@@ -491,18 +569,23 @@ class Controller:
                 'descuento_monto': mejor_descuento
             })
             total_neto += subtotal_linea_final
+
         descuento_global = 0
         nombre_promo_global = ""
+        
         for prom in promos:
             if prom[2] == "Global" and prom[4] == "Volumen":
                 umbral = prom[5]
                 desc = prom[6]
+                
                 if total_neto >= umbral:
                     if desc > descuento_global:
                         descuento_global = desc
                         nombre_promo_global = prom[1]
+
         total_final = total_neto - descuento_global
         if total_final < 0: total_final = 0
+        
         return {
             'items': items_procesados,
             'subtotal_bruto': subtotal_bruto,
@@ -511,6 +594,7 @@ class Controller:
             'total_final': total_final
         }
 
+    # --- Auxiliares ---
     def obtener_categorias(self):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -528,31 +612,20 @@ class LoginWindow:
         self.root = root
         self.on_login_success = on_login_success
         self.root.title("Login - Mis Trapitos")
-        self.root.geometry("350x300")
-        
-        estilos.aplicar_tema(self.root)
-        
+        self.root.geometry("300x250")
         self.controller = Controller()
         
-        frame = tk.Frame(root, bg=estilos.COLOR_BLANCO, padx=20, pady=20)
-        frame.place(relx=0.5, rely=0.5, anchor="center")
+        tk.Label(root, text="INICIAR SESIÓN", font=("Arial", 14, "bold")).pack(pady=20)
         
-        tk.Label(frame, text="INICIAR SESIÓN", font=estilos.FONT_H1, 
-                 bg=estilos.COLOR_BLANCO, fg=estilos.COLOR_PRIMARY).pack(pady=10)
+        tk.Label(root, text="Usuario:").pack()
+        self.entry_user = tk.Entry(root)
+        self.entry_user.pack()
         
-        tk.Label(frame, text="Usuario:", font=estilos.FONT_NORMAL, bg=estilos.COLOR_BLANCO).pack(anchor="w")
-        self.entry_user = tk.Entry(frame)
-        estilos.style_entry(self.entry_user)
-        self.entry_user.pack(fill="x", pady=(0,10))
+        tk.Label(root, text="Contraseña:").pack()
+        self.entry_pass = tk.Entry(root, show="*")
+        self.entry_pass.pack()
         
-        tk.Label(frame, text="Contraseña:", font=estilos.FONT_NORMAL, bg=estilos.COLOR_BLANCO).pack(anchor="w")
-        self.entry_pass = tk.Entry(frame, show="*")
-        estilos.style_entry(self.entry_pass)
-        self.entry_pass.pack(fill="x", pady=(0,20))
-        
-        btn_login = tk.Button(frame, text="Ingresar", command=self.validar)
-        estilos.style_button_primary(btn_login)
-        btn_login.pack(fill="x")
+        tk.Button(root, text="Ingresar", command=self.validar, bg="#4CAF50", fg="white").pack(pady=20)
 
     def validar(self):
         user = self.entry_user.get()
@@ -568,12 +641,12 @@ class VistaPrincipal:
     def __init__(self, usuario):
         self.usuario = usuario
         self.root = tk.Tk()
-        self.root.title(f"Mis Trapitos - Boutique System | Usuario: {usuario[1]} ({usuario[3]})")
+        self.root.title(f"Sistema Mis Trapitos - Usuario: {usuario[1]} ({usuario[3]})")
         self.root.state('zoomed')
-        
-        estilos.aplicar_tema(self.root)
-        
         self.controller = Controller()
+        
+        # Inicializar estilo
+        self.style = estilos.configurar_estilo()
         
         self.crear_menu_lateral()
         self.crear_area_contenido()
@@ -582,13 +655,12 @@ class VistaPrincipal:
         self.root.mainloop()
 
     def crear_menu_lateral(self):
-        self.frm_menu = tk.Frame(self.root, width=220, bg=estilos.COLOR_SIDEBAR)
+        self.frm_menu = tk.Frame(self.root, width=200, bg=estilos.COLOR_SIDEBAR)
         self.frm_menu.pack(side="left", fill="y")
         self.frm_menu.pack_propagate(False)
         
-        lbl_logo = tk.Label(self.frm_menu, text="👗\nMis Trapitos", 
-                            bg=estilos.COLOR_SIDEBAR, fg="white", font=estilos.FONT_H1)
-        lbl_logo.pack(pady=30)
+        lbl_logo = tk.Label(self.frm_menu, text="👗\nMis Trapitos", bg=estilos.COLOR_SIDEBAR, fg="white", font=("Arial", 16))
+        lbl_logo.pack(pady=20)
         
         btns = [
             ("Inventario", self.mostrar_inventario),
@@ -607,9 +679,9 @@ class VistaPrincipal:
             estilos.style_button_sidebar(btn)
             btn.pack(fill="x", pady=2)
             
-        btn_salir = tk.Button(self.frm_menu, text="Cerrar Sesión", command=self.root.destroy)
+        btn_salir = tk.Button(self.frm_menu, text="Salir", command=self.root.destroy)
         estilos.style_button_danger(btn_salir)
-        btn_salir.pack(side="bottom", fill="x", pady=20, padx=20)
+        btn_salir.pack(side="bottom", fill="x", pady=10)
 
     def crear_area_contenido(self):
         self.content_area = tk.Frame(self.root, bg=estilos.COLOR_FONDO_APP)
@@ -622,39 +694,70 @@ class VistaPrincipal:
     # ========================== VISTA: INVENTARIO ==========================
     def mostrar_inventario(self):
         self.limpiar_contenido()
-        tk.Label(self.content_area, text="Gestión de Inventario", font=estilos.FONT_H1, 
-                 bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_SIDEBAR).pack(pady=20)
+        tk.Label(self.content_area, text="Gestión de Inventario", font=estilos.FONT_H1, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO).pack(pady=10)
         
+        # 1. Filtros
         frm_filtros = tk.Frame(self.content_area, bg=estilos.COLOR_FONDO_APP)
-        frm_filtros.pack(fill="x", padx=30)
+        frm_filtros.pack(fill="x", padx=20)
         
-        tk.Label(frm_filtros, text="Nombre:", bg=estilos.COLOR_FONDO_APP, font=estilos.FONT_NORMAL).pack(side="left")
+        # Filtro Nombre
+        tk.Label(frm_filtros, text="Nombre:", bg=estilos.COLOR_FONDO_APP).pack(side="left")
         txt_filtro_nombre = tk.Entry(frm_filtros)
-        estilos.style_entry(txt_filtro_nombre)
-        txt_filtro_nombre.pack(side="left", padx=10)
+        txt_filtro_nombre.pack(side="left", padx=5)
         
-        tk.Label(frm_filtros, text="Categoría:", bg=estilos.COLOR_FONDO_APP, font=estilos.FONT_NORMAL).pack(side="left", padx=5)
+        # Filtro Categoría
+        tk.Label(frm_filtros, text="Categoría:", bg=estilos.COLOR_FONDO_APP).pack(side="left", padx=5)
         cmb_filtro_cat = ttk.Combobox(frm_filtros, values=["Todas"] + [c[1] for c in self.controller.obtener_categorias()])
         cmb_filtro_cat.current(0)
         cmb_filtro_cat.pack(side="left")
 
-        tk.Label(frm_filtros, text="Proveedor:", bg=estilos.COLOR_FONDO_APP, font=estilos.FONT_NORMAL).pack(side="left", padx=10)
+        # Filtro Proveedor
+        tk.Label(frm_filtros, text="Proveedor:", bg=estilos.COLOR_FONDO_APP).pack(side="left", padx=5)
         provs = [p[1] for p in self.controller.obtener_proveedores()]
         cmb_filtro_prov = ttk.Combobox(frm_filtros, values=["Todos"] + provs)
         cmb_filtro_prov.current(0)
         cmb_filtro_prov.pack(side="left")
         
-        btn_filtro = tk.Button(frm_filtros, text="Filtrar", command=lambda: cargar_datos())
-        estilos.style_button_primary(btn_filtro)
-        btn_filtro.pack(side="left", padx=20)
+        btn_filtrar = tk.Button(frm_filtros, text="Filtrar", command=lambda: cargar_datos())
+        estilos.style_button_primary(btn_filtrar)
+        btn_filtrar.pack(side="left", padx=10)
         
+        # --- NUEVO: Botón Eliminar ---
+        def eliminar_seleccionado():
+            seleccion = tree.selection()
+            if not seleccion:
+                messagebox.showwarning("Aviso", "Selecciona un producto para eliminar.")
+                return
+            
+            item = tree.item(seleccion[0])
+            prod_id = item['values'][0]
+            prod_nombre = item['values'][1]
+            
+            confirmar = messagebox.askyesno("Confirmar Eliminación", 
+                                          f"¿Estás seguro de que deseas eliminar el producto:\n'{prod_nombre}'?\n\nEsta acción no se puede deshacer.",
+                                          icon='warning')
+            if confirmar:
+                try:
+                    if self.controller.eliminar_producto(prod_id):
+                        messagebox.showinfo("Éxito", "Producto eliminado correctamente.")
+                        cargar_datos()
+                    else:
+                        messagebox.showerror("Error", "No se pudo eliminar el producto.")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Ocurrió un error al eliminar: {e}")
+
+        btn_eliminar = tk.Button(frm_filtros, text="🗑️ Eliminar", command=eliminar_seleccionado)
+        estilos.style_button_danger(btn_eliminar)
+        btn_eliminar.pack(side="right", padx=10)
+
+        # 2. Etiqueta TOTAL abajo
+        self.lbl_total_stock = tk.Label(self.content_area, text="Total Existencias: 0", font=("Arial", 12, "bold"), fg="green", bg=estilos.COLOR_FONDO_APP)
+        self.lbl_total_stock.pack(side="bottom", pady=10)
+
+        # 3. Tabla
         cols = ("ID", "Nombre", "Talla", "Color", "Precio", "Stock", "Categoría", "Proveedor")
         tree = ttk.Treeview(self.content_area, columns=cols, show="headings")
-        tree.pack(fill="both", expand=True, padx=30, pady=10)
-        
-        self.lbl_total_stock = tk.Label(self.content_area, text="Total Existencias: 0", 
-                                        font=estilos.FONT_H2, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_SUCCESS)
-        self.lbl_total_stock.pack(pady=10, side="bottom")
+        tree.pack(side="top", fill="both", expand=True, padx=20, pady=10)
         
         self.orden_actual = {"col": "ID", "reverse": False} 
 
@@ -722,22 +825,20 @@ class VistaPrincipal:
     # ========================== VISTA: PUNTO DE VENTA (POS) ==========================
     def mostrar_pos(self):
         self.limpiar_contenido()
-        tk.Label(self.content_area, text="Punto de Venta", font=estilos.FONT_H1,
-                 bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_SIDEBAR).pack(pady=10)
+        tk.Label(self.content_area, text="Punto de Venta", font=estilos.FONT_H1, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO).pack(pady=10)
         
         frm_principal = tk.Frame(self.content_area, bg=estilos.COLOR_FONDO_APP)
-        frm_principal.pack(fill="both", expand=True, padx=20)
+        frm_principal.pack(fill="both", expand=True, padx=10)
         
         # Izquierda: Productos
-        frm_izq = tk.LabelFrame(frm_principal, text="Productos Disponibles", bg=estilos.COLOR_FONDO_APP, font=estilos.FONT_BOLD)
-        frm_izq.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        frm_izq = tk.LabelFrame(frm_principal, text="Productos Disponibles", bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO)
+        frm_izq.pack(side="left", fill="both", expand=True)
         
         frm_filtros_pos = tk.Frame(frm_izq, bg=estilos.COLOR_FONDO_APP)
         frm_filtros_pos.pack(fill="x", padx=5, pady=5)
         
         tk.Label(frm_filtros_pos, text="Nombre:", bg=estilos.COLOR_FONDO_APP).pack(side="left")
         txt_filtro_nombre = tk.Entry(frm_filtros_pos, width=15)
-        estilos.style_entry(txt_filtro_nombre)
         txt_filtro_nombre.pack(side="left", padx=5)
         
         tk.Label(frm_filtros_pos, text="Cat:", bg=estilos.COLOR_FONDO_APP).pack(side="left", padx=5)
@@ -756,11 +857,11 @@ class VistaPrincipal:
         tree_prods.pack(fill="both", expand=True, padx=5, pady=5)
         
         # Derecha: Carrito
-        frm_der = tk.LabelFrame(frm_principal, text="Carrito de Compras", width=500, bg=estilos.COLOR_FONDO_APP, font=estilos.FONT_BOLD)
+        frm_der = tk.LabelFrame(frm_principal, text="Carrito de Compras", width=500, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO)
         frm_der.pack(side="right", fill="both", padx=10)
         
         cols_cart = ("Prod", "Cant", "P.Unit", "Desc", "Total")
-        tree_cart = ttk.Treeview(frm_der, columns=cols_cart, show="headings", height=8)
+        tree_cart = ttk.Treeview(frm_der, columns=cols_cart, show="headings", height=15)
         tree_cart.heading("Prod", text="Producto")
         tree_cart.heading("Cant", text="Cant")
         tree_cart.heading("P.Unit", text="$ Unit")
@@ -774,39 +875,17 @@ class VistaPrincipal:
         tree_cart.column("Total", width=70)
         tree_cart.pack(fill="x")
         
-        # VARIABLES DE ESTADO DEL CARRITO
         self.carrito_raw = [] 
         self.calculo_actual = None 
         
-        # --- NUEVO: BOTÓN DE ELIMINAR DEL CARRITO ---
-        def quitar_del_carrito():
-            sel = tree_cart.selection()
-            if not sel:
-                messagebox.showwarning("Aviso", "Seleccione un producto del carrito para quitar.")
-                return
-            
-            # Obtenemos el índice del item seleccionado en el treeview
-            iid = sel[0]
-            idx = tree_cart.index(iid)
-            
-            # Lo removemos de la lista raw
-            if 0 <= idx < len(self.carrito_raw):
-                del self.carrito_raw[idx]
-                actualizar_carrito()
-
-        btn_remove = tk.Button(frm_der, text="Quitar Seleccionado 🗑️", command=quitar_del_carrito)
-        estilos.style_button_danger(btn_remove)
-        btn_remove.pack(pady=5, fill="x")
-        # --------------------------------------------
-
-        self.lbl_subtotal = tk.Label(frm_der, text="Subtotal: $0.00", font=estilos.FONT_NORMAL, bg=estilos.COLOR_FONDO_APP)
+        self.lbl_subtotal = tk.Label(frm_der, text="Subtotal: $0.00", font=("Arial", 10), fg="gray", bg=estilos.COLOR_FONDO_APP)
         self.lbl_subtotal.pack(pady=2)
         
-        self.lbl_desc_global = tk.Label(frm_der, text="Desc. Global: -$0.00", font=estilos.FONT_NORMAL, fg=estilos.COLOR_SUCCESS, bg=estilos.COLOR_FONDO_APP)
+        self.lbl_desc_global = tk.Label(frm_der, text="Desc. Global: -$0.00", font=("Arial", 10), fg="green", bg=estilos.COLOR_FONDO_APP)
         self.lbl_desc_global.pack(pady=2)
         
         self.total_var = tk.StringVar(value="TOTAL A PAGAR: $0.00")
-        tk.Label(frm_der, textvariable=self.total_var, font=estilos.FONT_H1, fg=estilos.COLOR_PRIMARY, bg=estilos.COLOR_FONDO_APP).pack(pady=10)
+        tk.Label(frm_der, textvariable=self.total_var, font=("Arial", 16, "bold"), fg=estilos.COLOR_PRIMARY, bg=estilos.COLOR_FONDO_APP).pack(pady=10)
 
         # Referencias visuales
         self.tree_pos_cart_ref = tree_cart
@@ -873,37 +952,33 @@ class VistaPrincipal:
             self.total_var.set(f"TOTAL: ${res['total_final']:.2f}")
 
         def finalizar_venta():
-            if not self.carrito_raw: 
-                messagebox.showinfo("Aviso", "El carrito está vacío.")
-                return
+            if not self.carrito_raw: return
             self.popup_seleccionar_cliente()
 
         btn_add = tk.Button(frm_izq, text="Agregar al Carrito >>", command=agregar_al_carrito)
-        estilos.style_button_primary(btn_add)
+        estilos.style_button_success(btn_add)
         btn_add.pack(pady=5)
-        
-        # --- NUEVO: BOTÓN DE COBRAR VISIBLE ---
-        btn_pay = tk.Button(frm_der, text="Cobrar / Finalizar 💳", command=finalizar_venta)
-        estilos.style_button_success(btn_pay)
-        btn_pay.pack(pady=20, fill="x")
+
+        btn_cobrar = tk.Button(frm_der, text="Cobrar / Finalizar", command=finalizar_venta)
+        estilos.style_button_primary(btn_cobrar)
+        btn_cobrar.pack(pady=20, fill="x")
 
     def popup_seleccionar_cliente(self):
         top = tk.Toplevel(self.root)
-        estilos.aplicar_tema(top)
-        top.title("Seleccionar Cliente para la Venta")
-        top.geometry("600x450")
+        top.title("Seleccionar Cliente")
+        top.geometry("600x400")
+        top.configure(bg=estilos.COLOR_FONDO_APP)
         
-        tk.Label(top, text="1. ¿Quién realiza la compra?", font=estilos.FONT_H2, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_PRIMARY).pack(pady=10)
+        tk.Label(top, text="Buscar Cliente (ID o Nombre):", bg=estilos.COLOR_FONDO_APP).pack(pady=5)
         
         frm_search = tk.Frame(top, bg=estilos.COLOR_FONDO_APP)
         frm_search.pack(fill="x", padx=10)
         
         entry_search = tk.Entry(frm_search)
-        estilos.style_entry(entry_search)
         entry_search.pack(side="left", fill="x", expand=True)
         
         cols = ("ID", "Nombre", "Email")
-        tree_cli = ttk.Treeview(top, columns=cols, show="headings", height=8)
+        tree_cli = ttk.Treeview(top, columns=cols, show="headings")
         tree_cli.heading("ID", text="ID"); tree_cli.column("ID", width=50)
         tree_cli.heading("Nombre", text="Nombre")
         tree_cli.heading("Email", text="Email")
@@ -940,27 +1015,25 @@ class VistaPrincipal:
             self.popup_metodo_pago(top, "Público General", None)
 
         frm_btns = tk.Frame(top, bg=estilos.COLOR_FONDO_APP)
-        frm_btns.pack(pady=20)
+        frm_btns.pack(pady=10)
         
-        btn_pub = tk.Button(frm_btns, text="Usar Público General", command=publico_general)
-        estilos.style_button_primary(btn_pub)
-        btn_pub.configure(bg="#7F8C8D") # Gris profesional
-        btn_pub.pack(side="left", padx=20)
+        btn_pg = tk.Button(frm_btns, text="Usar Público General", command=publico_general)
+        estilos.style_button_warning(btn_pg)
+        btn_pg.pack(side="left", padx=10)
         
         btn_sel = tk.Button(frm_btns, text="Seleccionar Cliente", command=confirmar_seleccion)
         estilos.style_button_success(btn_sel)
-        btn_sel.pack(side="left", padx=20)
+        btn_sel.pack(side="left", padx=10)
 
     # NUEVO: Popup para método de pago CON TRANSFERENCIA
     def popup_metodo_pago(self, parent_window, nombre_cliente, cliente_id):
         win_pago = tk.Toplevel(self.root)
-        estilos.aplicar_tema(win_pago)
         win_pago.title("Método de Pago")
-        win_pago.geometry("400x350")
+        win_pago.geometry("350x300")
+        win_pago.configure(bg=estilos.COLOR_FONDO_APP)
         
-        tk.Label(win_pago, text="2. Seleccione Método de Pago", font=estilos.FONT_H2, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_PRIMARY).pack(pady=10)
-        tk.Label(win_pago, text=f"Cliente: {nombre_cliente}", font=estilos.FONT_NORMAL, bg=estilos.COLOR_FONDO_APP).pack(pady=5)
-        tk.Label(win_pago, text=f"Total a Pagar: {self.total_var.get().split(':')[-1]}", font=("Segoe UI", 16, "bold"), fg=estilos.COLOR_SUCCESS, bg=estilos.COLOR_FONDO_APP).pack(pady=10)
+        tk.Label(win_pago, text=f"Cliente: {nombre_cliente}", font=("Arial", 10), bg=estilos.COLOR_FONDO_APP).pack(pady=10)
+        tk.Label(win_pago, text=f"Total: {self.total_var.get()}", font=("Arial", 12, "bold"), bg=estilos.COLOR_FONDO_APP).pack(pady=5)
         
         def pagar(metodo):
             try:
@@ -972,7 +1045,7 @@ class VistaPrincipal:
                     cliente_id,
                     metodo 
                 )
-                messagebox.showinfo("Venta Exitosa", f"Venta #{venta_id} registrada correctamente.\nMétodo: {metodo}")
+                messagebox.showinfo("Éxito", f"Venta #{venta_id} registrada ({metodo})")
                 
                 # Limpieza
                 self.carrito_raw = []
@@ -981,7 +1054,7 @@ class VistaPrincipal:
                 for i in self.tree_pos_cart_ref.get_children(): self.tree_pos_cart_ref.delete(i)
                 self.lbl_subtotal_ref.config(text="Subtotal: $0.00")
                 self.lbl_desc_global_ref.config(text="")
-                self.total_var_ref.set("TOTAL A PAGAR: $0.00")
+                self.total_var_ref.set("Total: $0.00")
                 
                 self.mostrar_pos() 
                 
@@ -991,37 +1064,37 @@ class VistaPrincipal:
             except Exception as e:
                 messagebox.showerror("Error", str(e))
         
-        btn_efectivo = tk.Button(win_pago, text="💵 Efectivo", width=25, command=lambda: pagar("Efectivo"))
+        btn_efectivo = tk.Button(win_pago, text="💵 Efectivo", command=lambda: pagar("Efectivo"), width=20)
         estilos.style_button_success(btn_efectivo)
         btn_efectivo.pack(pady=5)
         
-        btn_tarjeta = tk.Button(win_pago, text="💳 Tarjeta", width=25, command=lambda: pagar("Tarjeta"))
+        btn_tarjeta = tk.Button(win_pago, text="💳 Tarjeta", command=lambda: pagar("Tarjeta"), width=20)
         estilos.style_button_primary(btn_tarjeta)
         btn_tarjeta.pack(pady=5)
 
-        btn_transf = tk.Button(win_pago, text="🏦 Transferencia", width=25, command=lambda: pagar("Transferencia"))
-        estilos.style_button_primary(btn_transf)
-        btn_transf.configure(bg="#8E44AD") # Morado
+        # NUEVO BOTÓN
+        btn_transf = tk.Button(win_pago, text="🏦 Transferencia", command=lambda: pagar("Transferencia"), width=20)
+        estilos.style_button_primary(btn_transf) # Usamos primary o podemos crear uno nuevo
+        btn_transf.configure(bg="#9C27B0") # Override color purpura
         btn_transf.pack(pady=5)
 
     # ========================== VISTA: PROMOCIONES ==========================
     def mostrar_promociones(self):
         self.limpiar_contenido()
-        tk.Label(self.content_area, text="Gestión de Promociones", font=estilos.FONT_H1, 
-                 bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_SIDEBAR).pack(pady=10)
+        tk.Label(self.content_area, text="Gestión de Promociones", font=estilos.FONT_H1, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO).pack(pady=10)
         
-        frm_form = tk.LabelFrame(self.content_area, text="Nueva Promoción", bg=estilos.COLOR_FONDO_APP, font=estilos.FONT_BOLD)
+        frm_form = tk.LabelFrame(self.content_area, text="Nueva Promoción", bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO)
         frm_form.pack(fill="x", padx=20, pady=5)
         
         f1 = tk.Frame(frm_form, bg=estilos.COLOR_FONDO_APP); f1.pack(fill="x", pady=2)
         tk.Label(f1, text="Nombre Promo:", bg=estilos.COLOR_FONDO_APP).pack(side="left")
-        entry_nom = tk.Entry(f1, width=20); estilos.style_entry(entry_nom); entry_nom.pack(side="left", padx=5)
+        entry_nom = tk.Entry(f1, width=20); entry_nom.pack(side="left", padx=5)
         
         tk.Label(f1, text="Inicio (YYYY-MM-DD):", bg=estilos.COLOR_FONDO_APP).pack(side="left")
-        entry_ini = tk.Entry(f1, width=12); estilos.style_entry(entry_ini); entry_ini.insert(0, date.today().strftime("%Y-%m-%d")); entry_ini.pack(side="left", padx=5)
+        entry_ini = tk.Entry(f1, width=12); entry_ini.insert(0, date.today().strftime("%Y-%m-%d")); entry_ini.pack(side="left", padx=5)
         
         tk.Label(f1, text="Fin (YYYY-MM-DD):", bg=estilos.COLOR_FONDO_APP).pack(side="left")
-        entry_fin = tk.Entry(f1, width=12); estilos.style_entry(entry_fin); entry_fin.insert(0, "2025-12-31"); entry_fin.pack(side="left", padx=5)
+        entry_fin = tk.Entry(f1, width=12); entry_fin.insert(0, "2025-12-31"); entry_fin.pack(side="left", padx=5)
 
         f2 = tk.Frame(frm_form, bg=estilos.COLOR_FONDO_APP); f2.pack(fill="x", pady=5)
         
@@ -1061,11 +1134,11 @@ class VistaPrincipal:
         f3 = tk.Frame(frm_form, bg=estilos.COLOR_FONDO_APP); f3.pack(fill="x", pady=5)
         lbl_v1 = tk.Label(f3, text="Valor (% o Monto):", bg=estilos.COLOR_FONDO_APP)
         lbl_v1.pack(side="left")
-        entry_v1 = tk.Entry(f3, width=10); estilos.style_entry(entry_v1); entry_v1.pack(side="left", padx=5)
+        entry_v1 = tk.Entry(f3, width=10); entry_v1.pack(side="left", padx=5)
         
         lbl_v2 = tk.Label(f3, text="Valor 2 (opcional):", bg=estilos.COLOR_FONDO_APP)
         lbl_v2.pack(side="left")
-        entry_v2 = tk.Entry(f3, width=10); estilos.style_entry(entry_v2); entry_v2.pack(side="left", padx=5)
+        entry_v2 = tk.Entry(f3, width=10); entry_v2.pack(side="left", padx=5)
         
         def actualizar_labels_valores(event):
             t = cmb_tipo_desc.get()
@@ -1106,9 +1179,9 @@ class VistaPrincipal:
             except Exception as e:
                 messagebox.showerror("Error", str(e))
 
-        btn_save = tk.Button(frm_form, text="Guardar Regla", command=guardar_promo)
-        estilos.style_button_success(btn_save)
-        btn_save.pack(pady=5)
+        btn_guardar = tk.Button(frm_form, text="Guardar Regla", command=guardar_promo)
+        estilos.style_button_success(btn_guardar)
+        btn_guardar.pack(pady=5)
 
         tree = ttk.Treeview(self.content_area, columns=("ID", "Nombre", "Regla", "Valores", "Vigencia"), show="headings")
         tree.heading("ID", text="ID"); tree.column("ID", width=30)
@@ -1126,9 +1199,9 @@ class VistaPrincipal:
                 self.controller.eliminar_promocion(pid)
                 cargar_lista_promos()
 
-        btn_del = tk.Button(self.content_area, text="Eliminar Seleccionada", command=eliminar_promo)
-        estilos.style_button_danger(btn_del)
-        btn_del.pack(pady=5)
+        btn_eliminar = tk.Button(self.content_area, text="Eliminar Seleccionada", command=eliminar_promo)
+        estilos.style_button_danger(btn_eliminar)
+        btn_eliminar.pack(pady=5)
 
         def cargar_lista_promos():
             for i in tree.get_children(): tree.delete(i)
@@ -1148,8 +1221,7 @@ class VistaPrincipal:
     # ========================== VISTA: CLIENTES ==========================
     def mostrar_clientes(self):
         self.limpiar_contenido()
-        tk.Label(self.content_area, text="Directorio de Clientes", font=estilos.FONT_H1,
-                 bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_SIDEBAR).pack(pady=10)
+        tk.Label(self.content_area, text="Directorio de Clientes", font=estilos.FONT_H1, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO).pack(pady=10)
         
         frm_botones = tk.Frame(self.content_area, bg=estilos.COLOR_FONDO_APP)
         frm_botones.pack(fill="x", padx=20, pady=5)
@@ -1164,8 +1236,7 @@ class VistaPrincipal:
         
         if self.usuario[3] == "Administrador":
             btn_imp = tk.Button(frm_botones, text="Importar CSV Clientes", command=self.importar_csv_clientes)
-            estilos.style_button_primary(btn_imp)
-            btn_imp.configure(bg=estilos.COLOR_WARNING)
+            estilos.style_button_warning(btn_imp)
             btn_imp.pack(side="left", padx=5)
 
         cols = ("ID", "Nombre", "Dirección", "Teléfono", "Email")
@@ -1188,9 +1259,9 @@ class VistaPrincipal:
 
     def popup_historial_cliente(self):
         top = tk.Toplevel(self.root)
-        estilos.aplicar_tema(top)
         top.title("Historial de Compras por Cliente")
         top.geometry("700x500")
+        top.configure(bg=estilos.COLOR_FONDO_APP)
         
         tk.Label(top, text="Buscar Cliente (ID o Nombre):", bg=estilos.COLOR_FONDO_APP).pack(pady=5)
         
@@ -1198,7 +1269,6 @@ class VistaPrincipal:
         frm_search.pack(fill="x", padx=10)
         
         entry_search = tk.Entry(frm_search)
-        estilos.style_entry(entry_search)
         entry_search.pack(side="left", fill="x", expand=True)
         
         cols = ("ID", "Nombre", "Email")
@@ -1218,12 +1288,12 @@ class VistaPrincipal:
                 else:
                     tree_cli.insert("", "end", values=(c[0], c[1], c[3]))
         
-        btn_s = tk.Button(frm_search, text="Buscar", command=buscar_clientes)
-        estilos.style_button_primary(btn_s)
-        btn_s.pack(side="left", padx=5)
+        btn_search = tk.Button(frm_search, text="Buscar", command=buscar_clientes)
+        estilos.style_button_primary(btn_search)
+        btn_search.pack(side="left", padx=5)
         entry_search.bind("<Return>", buscar_clientes)
         
-        lbl_historial = tk.Label(top, text="Historial de Ventas:", font=estilos.FONT_BOLD, bg=estilos.COLOR_FONDO_APP)
+        lbl_historial = tk.Label(top, text="Historial de Ventas:", font=("Arial", 12, "bold"), bg=estilos.COLOR_FONDO_APP)
         lbl_historial.pack(pady=10)
         
         cols_v = ("ID Venta", "Fecha", "Total", "Vendedor", "Método")
@@ -1231,7 +1301,7 @@ class VistaPrincipal:
         for c in cols_v: tree_ventas.heading(c, text=c)
         tree_ventas.pack(fill="x", padx=10)
 
-        lbl_detalle = tk.Label(top, text="Detalle de Productos (Selecciona una venta):", font=estilos.FONT_NORMAL, bg=estilos.COLOR_FONDO_APP)
+        lbl_detalle = tk.Label(top, text="Detalle de Productos (Selecciona una venta):", font=("Arial", 10), bg=estilos.COLOR_FONDO_APP)
         lbl_detalle.pack(pady=5)
         
         cols_d = ("Producto", "Cant", "P.Unit", "Subtotal")
@@ -1278,28 +1348,24 @@ class VistaPrincipal:
 
     def popup_nuevo_cliente(self):
         top = tk.Toplevel(self.root)
-        estilos.aplicar_tema(top)
         top.title("Registrar Nuevo Cliente")
-        top.geometry("400x350")
+        top.geometry("400x300")
         
-        def lbl(txt): tk.Label(top, text=txt, bg=estilos.COLOR_FONDO_APP).pack(pady=2)
-        def ent(): 
-            e = tk.Entry(top, width=40)
-            estilos.style_entry(e)
-            e.pack()
-            return e
+        tk.Label(top, text="Nombre Completo:").pack(pady=5)
+        entry_nombre = tk.Entry(top, width=40)
+        entry_nombre.pack()
         
-        lbl("Nombre Completo:")
-        entry_nombre = ent()
+        tk.Label(top, text="Dirección:").pack(pady=5)
+        entry_dir = tk.Entry(top, width=40)
+        entry_dir.pack()
         
-        lbl("Dirección:")
-        entry_dir = ent()
+        tk.Label(top, text="Teléfono:").pack(pady=5)
+        entry_tel = tk.Entry(top, width=40)
+        entry_tel.pack()
         
-        lbl("Teléfono:")
-        entry_tel = ent()
-        
-        lbl("Email:")
-        entry_email = ent()
+        tk.Label(top, text="Email:").pack(pady=5)
+        entry_email = tk.Entry(top, width=40)
+        entry_email.pack()
         
         def guardar():
             nom = entry_nombre.get()
@@ -1315,9 +1381,7 @@ class VistaPrincipal:
             else:
                 messagebox.showwarning("Faltan datos", "El nombre es obligatorio")
         
-        btn = tk.Button(top, text="Guardar Cliente", command=guardar)
-        estilos.style_button_primary(btn)
-        btn.pack(pady=20)
+        tk.Button(top, text="Guardar Cliente", command=guardar, bg="#2196F3", fg="white").pack(pady=20)
 
     def importar_csv_clientes(self):
         archivo_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
@@ -1343,8 +1407,7 @@ class VistaPrincipal:
     # ========================== VISTA: PROVEEDORES ==========================
     def mostrar_proveedores(self):
         self.limpiar_contenido()
-        tk.Label(self.content_area, text="Gestión de Proveedores", font=estilos.FONT_H1,
-                 bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_SIDEBAR).pack(pady=10)
+        tk.Label(self.content_area, text="Gestión de Proveedores", font=estilos.FONT_H1, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO).pack(pady=10)
         
         frm_btns = tk.Frame(self.content_area, bg=estilos.COLOR_FONDO_APP)
         frm_btns.pack(fill="x", padx=20, pady=5)
@@ -1352,21 +1415,21 @@ class VistaPrincipal:
         btn_new = tk.Button(frm_btns, text="+ Nuevo Proveedor", command=self.popup_nuevo_proveedor)
         estilos.style_button_success(btn_new)
         btn_new.pack(side="left", padx=5)
-
+        
         btn_asig = tk.Button(frm_btns, text="📦 Asignar Suministro", command=self.popup_asignar_suministro)
-        estilos.style_button_primary(btn_asig)
-        btn_asig.configure(bg=estilos.COLOR_WARNING)
+        estilos.style_button_warning(btn_asig)
         btn_asig.pack(side="left", padx=5)
-
-        btn_sel = tk.Button(frm_btns, text="🔄 Seleccionar Existente", command=self.popup_seleccionar_existente)
-        estilos.style_button_primary(btn_sel)
-        btn_sel.pack(side="left", padx=5)
-
-        btn_imp = tk.Button(frm_btns, text="Importar CSV", command=self.importar_csv_proveedores)
-        estilos.style_button_primary(btn_imp)
+        
+        btn_reab = tk.Button(frm_btns, text="🔄 Seleccionar Existente", command=self.popup_seleccionar_existente)
+        estilos.style_button_primary(btn_reab)
+        btn_reab.configure(bg="#009688")
+        btn_reab.pack(side="left", padx=5)
+        
+        btn_imp = tk.Button(frm_btns, text="Importar CSV Proveedores", command=self.importar_csv_proveedores)
+        estilos.style_button_sidebar(btn_imp)
         btn_imp.configure(bg="#607D8B")
         btn_imp.pack(side="left", padx=5)
-
+        
         btn_hist = tk.Button(frm_btns, text="📜 Historial Suministros", command=self.popup_historial_suministros)
         estilos.style_button_primary(btn_hist)
         btn_hist.pack(side="left", padx=5)
@@ -1395,16 +1458,16 @@ class VistaPrincipal:
         sel = self.tree_proveedores_ref.selection()
         
         top = tk.Toplevel(self.root)
-        estilos.aplicar_tema(top)
         top.title("Historial de Suministros por Proveedor")
         top.geometry("700x500")
+        top.configure(bg=estilos.COLOR_FONDO_APP)
         
         frm_top = tk.Frame(top, bg=estilos.COLOR_FONDO_APP)
         frm_top.pack(fill="x", padx=10, pady=5)
         
         tk.Label(frm_top, text="Proveedor Seleccionado:", bg=estilos.COLOR_FONDO_APP).pack(side="left")
         
-        lbl_prov_actual = tk.Label(frm_top, text="Ninguno", font=estilos.FONT_BOLD, fg=estilos.COLOR_PRIMARY, bg=estilos.COLOR_FONDO_APP)
+        lbl_prov_actual = tk.Label(frm_top, text="Ninguno", font=("Arial", 10, "bold"), fg="blue", bg=estilos.COLOR_FONDO_APP)
         lbl_prov_actual.pack(side="left", padx=10)
         
         provs = self.controller.obtener_proveedores()
@@ -1421,12 +1484,11 @@ class VistaPrincipal:
                 lbl_prov_actual.config(text=p_data[1])
                 current_prov_id = p_data[0]
 
-        frm_filter = tk.LabelFrame(top, text="Filtrar Historial", bg=estilos.COLOR_FONDO_APP)
+        frm_filter = tk.LabelFrame(top, text="Filtrar Historial", bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO)
         frm_filter.pack(fill="x", padx=10, pady=5)
         
         tk.Label(frm_filter, text="Buscar (Fecha o Producto):", bg=estilos.COLOR_FONDO_APP).pack(side="left", padx=5)
         entry_filter = tk.Entry(frm_filter)
-        estilos.style_entry(entry_filter)
         entry_filter.pack(side="left", fill="x", expand=True, padx=5)
         
         btn_filter = tk.Button(frm_filter, text="🔍 Buscar", command=lambda: cargar_historial())
@@ -1470,35 +1532,27 @@ class VistaPrincipal:
 
     def popup_nuevo_proveedor(self):
         top = tk.Toplevel(self.root)
-        estilos.aplicar_tema(top)
         top.title("Registrar Proveedor")
         top.geometry("400x400")
         
-        def lbl(t): tk.Label(top, text=t, bg=estilos.COLOR_FONDO_APP).pack(pady=2)
-        def ent():
-            e = tk.Entry(top, width=40)
-            estilos.style_entry(e)
-            e.pack()
-            return e
-
-        lbl("Nombre Empresa:")
-        entry_nom = ent()
+        tk.Label(top, text="Nombre Empresa:").pack(pady=5)
+        entry_nom = tk.Entry(top, width=40); entry_nom.pack()
         
-        lbl("Categoría Suministro:")
+        tk.Label(top, text="Categoría Suministro:").pack(pady=5)
         cats = [c[1] for c in self.controller.obtener_categorias()]
         cats.append("Varios") 
         cmb_cat = ttk.Combobox(top, values=cats, state="readonly", width=37)
         cmb_cat.current(0)
         cmb_cat.pack()
         
-        lbl("Dirección:")
-        entry_dir = ent()
+        tk.Label(top, text="Dirección:").pack(pady=5)
+        entry_dir = tk.Entry(top, width=40); entry_dir.pack()
         
-        lbl("Teléfono:")
-        entry_tel = ent()
+        tk.Label(top, text="Teléfono:").pack(pady=5)
+        entry_tel = tk.Entry(top, width=40); entry_tel.pack()
         
-        lbl("Email:")
-        entry_email = ent()
+        tk.Label(top, text="Email:").pack(pady=5)
+        entry_email = tk.Entry(top, width=40); entry_email.pack()
         
         def guardar():
             nom = entry_nom.get()
@@ -1511,9 +1565,7 @@ class VistaPrincipal:
             else:
                 messagebox.showwarning("Error", "Nombre es obligatorio")
         
-        btn = tk.Button(top, text="Guardar", command=guardar)
-        estilos.style_button_primary(btn)
-        btn.pack(pady=20)
+        tk.Button(top, text="Guardar", command=guardar, bg="#2196F3", fg="white").pack(pady=20)
 
     def popup_asignar_suministro(self):
         sel = self.tree_proveedores_ref.selection()
@@ -1526,36 +1578,28 @@ class VistaPrincipal:
         prov_nombre = prov_data[1]
         
         top = tk.Toplevel(self.root)
-        estilos.aplicar_tema(top)
         top.title(f"Suministro de: {prov_nombre}")
         top.geometry("350x450")
         
-        def lbl(t): tk.Label(top, text=t, bg=estilos.COLOR_FONDO_APP).pack(pady=2)
-        def ent():
-            e = tk.Entry(top)
-            estilos.style_entry(e)
-            e.pack()
-            return e
-
-        lbl("Categoría:")
+        tk.Label(top, text="Categoría:").pack(pady=2)
         cats = [f"{c[0]} - {c[1]}" for c in self.controller.obtener_categorias()]
         cmb_cat = ttk.Combobox(top, values=cats, state="readonly")
         cmb_cat.pack()
         
-        lbl("Nombre Producto:")
-        entry_prod = ent()
+        tk.Label(top, text="Nombre Producto:").pack(pady=2)
+        entry_prod = tk.Entry(top); entry_prod.pack()
         
-        lbl("Talla:")
-        entry_talla = ent()
+        tk.Label(top, text="Talla:").pack(pady=2)
+        entry_talla = tk.Entry(top); entry_talla.pack()
         
-        lbl("Color:")
-        entry_color = ent()
+        tk.Label(top, text="Color:").pack(pady=2)
+        entry_color = tk.Entry(top); entry_color.pack()
         
-        lbl("Precio Venta ($):")
-        entry_precio = ent()
+        tk.Label(top, text="Precio Venta ($):").pack(pady=2)
+        entry_precio = tk.Entry(top); entry_precio.pack()
         
-        lbl("Stock Inicial (Cantidad):")
-        entry_stock = ent()
+        tk.Label(top, text="Stock Inicial (Cantidad):").pack(pady=2)
+        entry_stock = tk.Entry(top); entry_stock.pack()
         
         def registrar_suministro():
             try:
@@ -1583,9 +1627,7 @@ class VistaPrincipal:
             except Exception as e:
                 messagebox.showerror("Error Crítico", str(e))
         
-        btn = tk.Button(top, text="Registrar Entrada", command=registrar_suministro)
-        estilos.style_button_success(btn)
-        btn.pack(pady=20)
+        tk.Button(top, text="Registrar Entrada", command=registrar_suministro, bg="#4CAF50", fg="white").pack(pady=20)
 
     def popup_seleccionar_existente(self):
         sel = self.tree_proveedores_ref.selection()
@@ -1598,11 +1640,10 @@ class VistaPrincipal:
         prov_nombre = prov_data[1]
         
         top = tk.Toplevel(self.root)
-        estilos.aplicar_tema(top)
         top.title(f"Reabastecer de: {prov_nombre}")
         top.geometry("600x400")
         
-        tk.Label(top, text=f"Productos suministrados por {prov_nombre}", font=estilos.FONT_BOLD, bg=estilos.COLOR_FONDO_APP).pack(pady=10)
+        tk.Label(top, text=f"Productos suministrados por {prov_nombre}", font=("Arial", 10, "bold")).pack(pady=10)
         
         cols = ("ID", "Producto", "Talla", "Color", "Precio Actual", "Stock Actual")
         tree_prods = ttk.Treeview(top, columns=cols, show="headings")
@@ -1621,7 +1662,7 @@ class VistaPrincipal:
         productos = self.controller.obtener_productos(filtros)
         
         if not productos:
-            tk.Label(top, text="No hay productos registrados de este proveedor.", fg="red", bg=estilos.COLOR_FONDO_APP).pack()
+            tk.Label(top, text="No hay productos registrados de este proveedor.", fg="red").pack()
         
         for p in productos:
             tree_prods.insert("", "end", values=(p[0], p[1], p[5], p[6], f"${p[4]:.2f}", p[7]))
@@ -1648,9 +1689,7 @@ class VistaPrincipal:
             except Exception as e:
                 messagebox.showerror("Error", str(e))
 
-        btn = tk.Button(top, text="➕ Agregar Stock al Seleccionado", command=agregar_stock)
-        estilos.style_button_primary(btn)
-        btn.pack(pady=15)
+        tk.Button(top, text="➕ Agregar Stock al Seleccionado", command=agregar_stock, bg="#009688", fg="white", font=("Arial", 11)).pack(pady=15)
 
     def importar_csv_proveedores(self):
         archivo_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
@@ -1679,8 +1718,7 @@ class VistaPrincipal:
     # ========================== VISTA: REPORTES ==========================
     def mostrar_reportes(self):
         self.limpiar_contenido()
-        tk.Label(self.content_area, text="Reportes Gerenciales", font=estilos.FONT_H1,
-                 bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_SIDEBAR).pack(pady=10)
+        tk.Label(self.content_area, text="Reportes Gerenciales", font=estilos.FONT_H1, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO).pack(pady=10)
         
         frm_btns = tk.Frame(self.content_area, bg=estilos.COLOR_FONDO_APP)
         frm_btns.pack(pady=5)
@@ -1690,7 +1728,7 @@ class VistaPrincipal:
         self.tree_reportes.pack(fill="both", expand=True, padx=20, pady=10)
         
         # Etiqueta para totalizador
-        self.lbl_total_reporte = tk.Label(self.content_area, text="", font=estilos.FONT_BOLD, fg=estilos.COLOR_PRIMARY, bg=estilos.COLOR_FONDO_APP)
+        self.lbl_total_reporte = tk.Label(self.content_area, text="", font=("Arial", 14, "bold"), fg="blue", bg=estilos.COLOR_FONDO_APP)
         self.lbl_total_reporte.pack(pady=10)
 
         # Función genérica para mostrar datos
@@ -1738,21 +1776,20 @@ class VistaPrincipal:
             cols, data = self.controller.ejecutar_consulta_reporte(tipo)
             mostrar_datos_en_tabla(cols, data)
 
-        btn_bs = tk.Button(frm_btns, text="Productos Bajo Stock", command=lambda: ver_simple("Bajo Stock"))
-        estilos.style_button_primary(btn_bs); btn_bs.configure(bg=estilos.COLOR_DANGER)
-        btn_bs.pack(side="left", padx=5)
+        btn_bajo = tk.Button(frm_btns, text="Productos Bajo Stock", command=lambda: ver_simple("Bajo Stock"))
+        estilos.style_button_warning(btn_bajo)
+        btn_bajo.pack(side="left", padx=5)
         
-        btn_vd = tk.Button(frm_btns, text="Ventas del Día", command=lambda: ver_simple("Ventas del Dia"))
-        estilos.style_button_primary(btn_vd)
-        btn_vd.pack(side="left", padx=5)
+        btn_ventas_dia = tk.Button(frm_btns, text="Ventas del Día", command=lambda: ver_simple("Ventas del Dia"))
+        estilos.style_button_success(btn_ventas_dia)
+        btn_ventas_dia.pack(side="left", padx=5)
         
         # REPORTE AVANZADO: VENTAS TOTALES
         def mostrar_filtro_ventas():
             self.limpiar_contenido()
-            tk.Label(self.content_area, text="Reporte de Ventas Totales", font=estilos.FONT_H1,
-                     bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_SIDEBAR).pack(pady=10)
+            tk.Label(self.content_area, text="Reporte de Ventas Totales", font=estilos.FONT_H1, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO).pack(pady=10)
             
-            frm_filtros = tk.LabelFrame(self.content_area, text="Filtros", bg=estilos.COLOR_FONDO_APP)
+            frm_filtros = tk.LabelFrame(self.content_area, text="Filtros", bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO)
             frm_filtros.pack(fill="x", padx=20, pady=5)
             
             # Filtro Período
@@ -1763,7 +1800,6 @@ class VistaPrincipal:
             
             # Entry días (oculto por defecto)
             entry_dias = tk.Entry(frm_filtros, width=5)
-            estilos.style_entry(entry_dias)
             entry_dias.pack(side="left", padx=2)
             entry_dias.config(state="disabled")
             
@@ -1804,7 +1840,7 @@ class VistaPrincipal:
             
             self.tree_reportes.pack(fill="both", expand=True, padx=20, pady=10)
             
-            self.lbl_total_reporte = tk.Label(self.content_area, text="Total Ventas: $0.00", font=estilos.FONT_H1, fg=estilos.COLOR_SUCCESS, bg=estilos.COLOR_FONDO_APP)
+            self.lbl_total_reporte = tk.Label(self.content_area, text="Total Ventas: $0.00", font=("Arial", 16, "bold"), fg="green", bg=estilos.COLOR_FONDO_APP)
             self.lbl_total_reporte.pack(pady=10)
             
             def aplicar_filtro():
@@ -1831,33 +1867,30 @@ class VistaPrincipal:
                 
                 self.lbl_total_reporte.config(text=f"Total Filtrado: ${suma_total:.2f}")
 
-            btn_ap = tk.Button(frm_filtros, text="Aplicar Filtros", command=aplicar_filtro)
-            estilos.style_button_primary(btn_ap)
-            btn_ap.pack(side="left", padx=20)
+            btn_aplicar = tk.Button(frm_filtros, text="Aplicar Filtros", command=aplicar_filtro)
+            estilos.style_button_primary(btn_aplicar)
+            btn_aplicar.pack(side="left", padx=20)
             
             # Botón Volver
-            btn_bk = tk.Button(self.content_area, text="< Volver al Menú Reportes", command=self.mostrar_reportes)
-            estilos.style_button_primary(btn_bk)
-            btn_bk.configure(bg="#95a5a6")
-            btn_bk.pack(side="bottom", pady=10)
+            tk.Button(self.content_area, text="< Volver al Menú Reportes", command=self.mostrar_reportes).pack(side="bottom", pady=10)
             
             aplicar_filtro() # Carga inicial
 
         # REPORTE AVANZADO: TOP PRODUCTOS (ROTACIÓN)
         def mostrar_filtro_top_productos():
             self.limpiar_contenido()
-            tk.Label(self.content_area, text="Reporte: Rotación de Productos", font=estilos.FONT_H1, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_SIDEBAR).pack(pady=10)
+            tk.Label(self.content_area, text="Reporte: Rotación de Productos", font=estilos.FONT_H1, bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO).pack(pady=10)
             
-            frm_filtros = tk.LabelFrame(self.content_area, text="Filtro de Tiempo", bg=estilos.COLOR_FONDO_APP)
+            frm_filtros = tk.LabelFrame(self.content_area, text="Filtros", bg=estilos.COLOR_FONDO_APP, fg=estilos.COLOR_TEXTO)
             frm_filtros.pack(fill="x", padx=20, pady=5)
             
+            # Filtro de tiempo
             tk.Label(frm_filtros, text="Período:", bg=estilos.COLOR_FONDO_APP).pack(side="left", padx=5)
             cmb_periodo = ttk.Combobox(frm_filtros, values=["Total", "Personalizado"], width=12, state="readonly")
             cmb_periodo.current(0)
             cmb_periodo.pack(side="left", padx=5)
             
             entry_dias = tk.Entry(frm_filtros, width=5)
-            estilos.style_entry(entry_dias)
             entry_dias.pack(side="left", padx=2)
             entry_dias.config(state="disabled")
             
@@ -1871,33 +1904,71 @@ class VistaPrincipal:
 
             cmb_periodo.bind("<<ComboboxSelected>>", toggle_entry)
             
+            # Filtro de Categoría (NUEVO)
+            tk.Label(frm_filtros, text="Categoría:", bg=estilos.COLOR_FONDO_APP).pack(side="left", padx=15)
+            cats = [c[1] for c in self.controller.obtener_categorias()]
+            cmb_cat = ttk.Combobox(frm_filtros, values=["Todas"] + cats, width=15, state="readonly")
+            cmb_cat.current(0)
+            cmb_cat.pack(side="left", padx=5)
+            
             self.tree_reportes = ttk.Treeview(self.content_area, columns=("Producto", "Unidades Vendidas"), show="headings")
+            self.tree_reportes.heading("Producto", text="Producto", command=lambda: ordenar_reporte_rotacion("Producto"))
+            self.tree_reportes.heading("Unidades Vendidas", text="Unidades Vendidas", command=lambda: ordenar_reporte_rotacion("Unidades Vendidas"))
             self.tree_reportes.pack(fill="both", expand=True, padx=20, pady=10)
+            
+            # Logica ordenamiento para este reporte especifico
+            self.orden_rotacion = {"col": "", "reverse": True}
+            def ordenar_reporte_rotacion(col):
+                if self.orden_rotacion["col"] == col:
+                    self.orden_rotacion["reverse"] = not self.orden_rotacion["reverse"]
+                else:
+                    self.orden_rotacion["col"] = col
+                    self.orden_rotacion["reverse"] = True
+                
+                items = [(self.tree_reportes.set(k, col), k) for k in self.tree_reportes.get_children('')]
+                
+                # Si es numerico
+                if col == "Unidades Vendidas":
+                     items.sort(key=lambda t: int(t[0]), reverse=self.orden_rotacion["reverse"])
+                else:
+                     items.sort(reverse=self.orden_rotacion["reverse"])
+                     
+                for index, (val, k) in enumerate(items):
+                    self.tree_reportes.move(k, '', index)
+
+            # Label Totalizador (NUEVO)
+            self.lbl_sum_unidades = tk.Label(self.content_area, text="", font=("Arial", 14, "bold"), fg="green", bg=estilos.COLOR_FONDO_APP)
+            self.lbl_sum_unidades.pack(pady=10)
             
             def aplicar_filtro_top():
                 modo = cmb_periodo.get()
+                cat_val = cmb_cat.get()
                 dias_valor = None
                 if modo == "Personalizado":
                     d = entry_dias.get()
                     if d and d.isdigit(): dias_valor = d
                 
-                cols, data = self.controller.ejecutar_consulta_reporte("Top Productos", dias_valor)
-                mostrar_datos_en_tabla(cols, data)
+                cols, data = self.controller.ejecutar_consulta_reporte("Top Productos", dias_valor, cat_val)
+                # Limpiar y llenar
+                for i in self.tree_reportes.get_children(): self.tree_reportes.delete(i)
+                for d in data: self.tree_reportes.insert("", "end", values=d)
+                
+                # Calcular suma de la columna "Unidades Vendidas" (índice 1)
+                total_units = sum(d[1] for d in data)
+                self.lbl_sum_unidades.config(text=f"Total Unidades Filtradas: {total_units}")
 
-            btn_ap = tk.Button(frm_filtros, text="Aplicar Filtros", command=aplicar_filtro_top)
-            estilos.style_button_primary(btn_ap)
-            btn_ap.pack(side="left", padx=20)
+            btn_aplicar = tk.Button(frm_filtros, text="Aplicar Filtros", command=aplicar_filtro_top)
+            estilos.style_button_primary(btn_aplicar)
+            btn_aplicar.pack(side="left", padx=20)
             
-            btn_bk = tk.Button(self.content_area, text="< Volver al Menú Reportes", command=self.mostrar_reportes)
-            estilos.style_button_primary(btn_bk); btn_bk.configure(bg="#95a5a6")
-            btn_bk.pack(side="bottom", pady=10)
+            tk.Button(self.content_area, text="< Volver al Menú Reportes", command=self.mostrar_reportes).pack(side="bottom", pady=10)
             
             aplicar_filtro_top()
 
         # Botón principal para ir al reporte avanzado
-        btn_ventas = tk.Button(frm_btns, text="💰 Ventas Totales", command=mostrar_filtro_ventas)
-        estilos.style_button_success(btn_ventas)
-        btn_ventas.pack(side="left", padx=5)
+        btn_ventas_tot = tk.Button(frm_btns, text="💰 Ventas Totales", command=mostrar_filtro_ventas)
+        estilos.style_button_primary(btn_ventas_tot)
+        btn_ventas_tot.pack(side="left", padx=5)
         
         btn_top = tk.Button(frm_btns, text="Más Vendidos / Rotación", command=mostrar_filtro_top_productos)
         estilos.style_button_primary(btn_top); btn_top.configure(bg=estilos.COLOR_WARNING)

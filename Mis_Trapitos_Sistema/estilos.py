@@ -1,10 +1,9 @@
-# =============================================================================
-# ESTILOS.PY - CONFIGURACIÓN VISUAL "MIS TRAPITOS"
-# =============================================================================
 import tkinter as tk
 from tkinter import ttk
 
-# --- PALETA DE COLORES (AZUL BOUTIQUE) ---
+# =============================================================================
+# PALETA DE COLORES (AZUL BOUTIQUE)
+# =============================================================================
 COLOR_FONDO_APP     = "#F4F7F6"  # Gris muy claro azulado (Fondo general)
 COLOR_SIDEBAR       = "#1A253A"  # Azul noche oscuro (Menu lateral)
 COLOR_SIDEBAR_HOVER = "#2C3E50"  # Azul grisaceo (Al pasar el mouse en menu)
@@ -15,69 +14,76 @@ COLOR_WARNING       = "#F39C12"  # Naranja (Editar/Importar)
 COLOR_TEXTO         = "#2C3E50"  # Texto oscuro
 COLOR_BLANCO        = "#FFFFFF"
 
-# --- TIPOGRAFÍAS ---
+# =============================================================================
+# TIPOGRAFÍAS
+# =============================================================================
+# Usamos una fuente segura como 'Segoe UI' (Windows) o 'Helvetica'/'Arial' si no existe
 FONT_H1 = ("Segoe UI", 20, "bold")      # Títulos grandes
 FONT_H2 = ("Segoe UI", 14, "bold")      # Subtítulos
 FONT_NORMAL = ("Segoe UI", 11)          # Texto normal
 FONT_BOLD = ("Segoe UI", 11, "bold")    # Texto negrita
-FONT_SMALL = ("Segoe UI", 9)            # Detalles
 
-def aplicar_tema(root):
-    """
-    Aplica el tema visual a la ventana raiz o toplevels.
-    """
-    try:
-        root.configure(bg=COLOR_FONDO_APP)
-    except:
-        pass # Por si es un frame que no soporta config bg directo
-    
+# =============================================================================
+# CONFIGURACIÓN DEL TEMA (TTK)
+# =============================================================================
+def configurar_estilo():
+    """Configura el estilo visual de los widgets modernos (ttk)."""
     style = ttk.Style()
-    style.theme_use('clam') # Usamos 'clam' para mayor control de colores
-
-    # --- Estilo de Tablas (Treeview) ---
+    
+    # Intentar usar el tema 'clam' que permite mejor personalización de colores
+    # Si no está disponible, usa el por defecto.
+    if 'clam' in style.theme_names():
+        style.theme_use('clam')
+    
+    # --- Estilo para Tablas (Treeview) ---
     style.configure("Treeview",
-                    background=COLOR_BLANCO,
-                    foreground=COLOR_TEXTO,
-                    rowheight=30, # Filas más altas para mejor lectura
-                    fieldbackground=COLOR_BLANCO,
+                    background="white",
+                    foreground="black",
+                    fieldbackground="white",
+                    rowheight=25,
                     font=("Segoe UI", 10))
     
     style.configure("Treeview.Heading",
                     background=COLOR_PRIMARY,
-                    foreground=COLOR_BLANCO,
-                    font=("Segoe UI", 10, "bold"))
+                    foreground="white",
+                    font=("Segoe UI", 10, "bold"),
+                    relief="flat")
     
     style.map("Treeview",
-              background=[('selected', '#AED6F1')], # Azul muy suave al seleccionar
+              background=[('selected', '#AED6F1')], # Azul suave al seleccionar
               foreground=[('selected', 'black')])
 
-    # --- Estilos de Combobox ---
+    # --- Estilo para Combobox ---
     style.configure("TCombobox", padding=5)
 
     return style
 
-# --- FUNCIONES DE AYUDA PARA WIDGETS ANTIGUOS (TK) ---
+# =============================================================================
+# FUNCIONES AUXILIARES PARA BOTONES (TKINTER NORMAL)
+# =============================================================================
+# Estas funciones aplican estilos predefinidos a los botones estándar de Tkinter
+
 def style_button_primary(btn):
+    """Botón Azul (Acciones principales)"""
     btn.configure(bg=COLOR_PRIMARY, fg=COLOR_BLANCO, font=FONT_BOLD, 
-                  bd=0, padx=15, pady=8, cursor="hand2")
+                  bd=0, padx=15, pady=8, cursor="hand2", activebackground="#1F618D", activeforeground="white")
 
 def style_button_success(btn):
+    """Botón Verde (Confirmaciones, Agregar)"""
     btn.configure(bg=COLOR_SUCCESS, fg=COLOR_BLANCO, font=FONT_BOLD, 
-                  bd=0, padx=15, pady=8, cursor="hand2")
+                  bd=0, padx=15, pady=8, cursor="hand2", activebackground="#1E8449", activeforeground="white")
 
 def style_button_danger(btn):
+    """Botón Rojo (Eliminar, Salir)"""
     btn.configure(bg=COLOR_DANGER, fg=COLOR_BLANCO, font=FONT_BOLD, 
-                  bd=0, padx=15, pady=8, cursor="hand2")
+                  bd=0, padx=15, pady=8, cursor="hand2", activebackground="#922B21", activeforeground="white")
+
+def style_button_warning(btn):
+    """Botón Naranja (Alertas, Importar)"""
+    btn.configure(bg=COLOR_WARNING, fg=COLOR_BLANCO, font=FONT_BOLD, 
+                  bd=0, padx=15, pady=8, cursor="hand2", activebackground="#D68910", activeforeground="white")
 
 def style_button_sidebar(btn):
+    """Botón del Menú Lateral"""
     btn.configure(bg=COLOR_SIDEBAR, fg=COLOR_BLANCO, font=("Segoe UI", 11), 
-                  bd=0, pady=12, padx=20, anchor="w", cursor="hand2")
-    
-    # Efecto Hover simple
-    def on_enter(e): btn['bg'] = COLOR_SIDEBAR_HOVER
-    def on_leave(e): btn['bg'] = COLOR_SIDEBAR
-    btn.bind("<Enter>", on_enter)
-    btn.bind("<Leave>", on_leave)
-
-def style_entry(entry):
-    entry.configure(font=FONT_NORMAL, bd=1, relief="solid")
+                  bd=0, padx=20, pady=12, cursor="hand2", anchor="w", activebackground=COLOR_SIDEBAR_HOVER, activeforeground="white")
