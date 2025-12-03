@@ -227,6 +227,7 @@ class Controller:
         conn.commit()
         conn.close()
 
+    # ACTUALIZADO: Filtro por Nombre de Proveedor
     def obtener_productos(self, filtro=None):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -243,9 +244,14 @@ class Controller:
             if filtro.get('categoria') and filtro['categoria'] != "Todas":
                 query += " AND c.nombre = ?"
                 params.append(filtro['categoria'])
+            # Filtro por ID (interno para reabastecer)
             if filtro.get('proveedor_id'):
                 query += " AND p.proveedor_id = ?"
                 params.append(filtro['proveedor_id'])
+            # Filtro por Nombre (para el Inventario UI)
+            if filtro.get('proveedor') and filtro['proveedor'] != "Todos":
+                query += " AND pr.nombre = ?"
+                params.append(filtro['proveedor'])
         
         cursor.execute(query, params)
         data = cursor.fetchall()
@@ -660,14 +666,23 @@ class VistaPrincipal:
         frm_filtros = tk.Frame(self.content_area)
         frm_filtros.pack(fill="x", padx=20)
         
-        tk.Label(frm_filtros, text="Buscar por Nombre:").pack(side="left")
+        # Filtro Nombre
+        tk.Label(frm_filtros, text="Nombre:").pack(side="left")
         txt_filtro_nombre = tk.Entry(frm_filtros)
         txt_filtro_nombre.pack(side="left", padx=5)
         
-        tk.Label(frm_filtros, text="Categoría:").pack(side="left", padx=10)
+        # Filtro Categoría
+        tk.Label(frm_filtros, text="Categoría:").pack(side="left", padx=5)
         cmb_filtro_cat = ttk.Combobox(frm_filtros, values=["Todas"] + [c[1] for c in self.controller.obtener_categorias()])
         cmb_filtro_cat.current(0)
         cmb_filtro_cat.pack(side="left")
+
+        # NUEVO FILTRO: PROVEEDOR
+        tk.Label(frm_filtros, text="Proveedor:").pack(side="left", padx=5)
+        provs = [p[1] for p in self.controller.obtener_proveedores()]
+        cmb_filtro_prov = ttk.Combobox(frm_filtros, values=["Todos"] + provs)
+        cmb_filtro_prov.current(0)
+        cmb_filtro_prov.pack(side="left")
         
         tk.Button(frm_filtros, text="Filtrar", command=lambda: cargar_datos()).pack(side="left", padx=10)
         
@@ -675,12 +690,10 @@ class VistaPrincipal:
         tree = ttk.Treeview(self.content_area, columns=cols, show="headings")
         tree.pack(fill="both", expand=True, padx=20, pady=10)
         
-        # --- NUEVO: Indicador Total Stock ---
         self.lbl_total_stock = tk.Label(self.content_area, text="Total Existencias: 0", font=("Arial", 12, "bold"), fg="green")
         self.lbl_total_stock.pack(pady=10, side="bottom")
         
-        # --- Lógica de Ordenamiento ---
-        self.orden_actual = {"col": "ID", "reverse": False} # Por defecto ID Ascendente
+        self.orden_actual = {"col": "ID", "reverse": False} 
 
         def ordenar(col):
             if self.orden_actual["col"] == col:
@@ -689,17 +702,14 @@ class VistaPrincipal:
                 self.orden_actual["col"] = col
                 self.orden_actual["reverse"] = False
             
-            # Actualizar encabezados visualmente
             for c in cols:
                 tree.heading(c, text=c, command=lambda _col=c: ordenar(_col) if _col in ["ID", "Precio", "Stock"] else None)
             
-            # Poner flecha
             flecha = " ▼" if self.orden_actual["reverse"] else " ▲"
             tree.heading(col, text=col + flecha, command=lambda: ordenar(col))
             
             cargar_datos()
 
-        # Configurar headers iniciales
         for col in cols:
             if col in ["ID", "Precio", "Stock"]:
                 tree.heading(col, text=col, command=lambda c=col: ordenar(c))
@@ -711,16 +721,14 @@ class VistaPrincipal:
             
             filtros = {
                 "nombre": txt_filtro_nombre.get(),
-                "categoria": cmb_filtro_cat.get()
+                "categoria": cmb_filtro_cat.get(),
+                "proveedor": cmb_filtro_prov.get() # Nuevo parametro
             }
-            # Convertimos a lista para poder ordenar en Python
             productos = list(self.controller.obtener_productos(filtros))
             
-            # NUEVO: Sumar stock total de la vista actual
             total_stock_visible = sum(p[7] for p in productos)
             self.lbl_total_stock.config(text=f"Total Existencias: {total_stock_visible}")
             
-            # Aplicar ordenamiento
             col_orden = self.orden_actual["col"]
             reverso = self.orden_actual["reverse"]
             
@@ -1227,6 +1235,7 @@ class VistaPrincipal:
                 messagebox.showinfo("Info", "Este cliente no tiene compras registradas.")
             
             for v in ventas:
+                # v tiene: id, fecha, total, username, metodo
                 metodo = v[4] if v[4] else "Desconocido"
                 tree_ventas.insert("", "end", values=(v[0], v[1], f"${v[2]:.2f}", v[3], metodo))
 
