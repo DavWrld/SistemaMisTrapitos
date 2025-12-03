@@ -227,7 +227,6 @@ class Controller:
         conn.commit()
         conn.close()
 
-    # ACTUALIZADO: Filtro por Nombre de Proveedor
     def obtener_productos(self, filtro=None):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -244,11 +243,9 @@ class Controller:
             if filtro.get('categoria') and filtro['categoria'] != "Todas":
                 query += " AND c.nombre = ?"
                 params.append(filtro['categoria'])
-            # Filtro por ID (interno para reabastecer)
             if filtro.get('proveedor_id'):
                 query += " AND p.proveedor_id = ?"
                 params.append(filtro['proveedor_id'])
-            # Filtro por Nombre (para el Inventario UI)
             if filtro.get('proveedor') and filtro['proveedor'] != "Todos":
                 query += " AND pr.nombre = ?"
                 params.append(filtro['proveedor'])
@@ -376,25 +373,46 @@ class Controller:
             data = cursor.fetchall()
             
         elif tipo_reporte == "Top Productos":
-            query = '''SELECT p.nombre, SUM(d.cantidad) as total_vendido 
-                       FROM detalle_ventas d
-                       JOIN productos p ON d.producto_id = p.id
-                       JOIN ventas v ON d.venta_id = v.id
-                       WHERE 1=1'''
-            params = []
+            # MODIFICADO: Left Join para incluir todos los productos, incluso con 0 ventas
+            # Usamos subconsulta para filtrar ventas por fecha ANTES de agrupar
+            
+            subquery_ventas = "SELECT id FROM ventas WHERE 1=1"
+            params_sub = []
             
             if dias and dias != "Total":
                 try:
                     dias_int = int(dias)
                     fecha_limite = (datetime.now() - timedelta(days=dias_int)).strftime("%Y-%m-%d")
-                    query += " AND v.fecha >= ?"
-                    params.append(fecha_limite)
+                    subquery_ventas += " AND fecha >= ?"
+                    params_sub.append(fecha_limite)
                 except ValueError: pass
-
-            query += ''' GROUP BY p.id
-                         ORDER BY total_vendido DESC LIMIT 10'''
             
-            cursor.execute(query, params)
+            # Consulta Principal: Productos LEFT JOIN (Detalle JOIN VentasFiltradas)
+            query = f'''
+                SELECT p.nombre, COALESCE(SUM(d.cantidad), 0) as total_vendido
+                FROM productos p
+                LEFT JOIN detalle_ventas d ON p.id = d.producto_id
+                LEFT JOIN ({subquery_ventas}) v ON d.venta_id = v.id
+                WHERE (d.id IS NULL OR v.id IS NOT NULL) -- Asegura que si hay detalle, sea de una venta valida en fecha
+                GROUP BY p.id
+                ORDER BY total_vendido DESC
+            '''
+            # Nota: La lógica del WHERE anterior es un poco truculenta en SQL simple.
+            # Mejor enfoque limpio: Subquery directa de cantidades vendidas en el periodo
+            
+            query_clean = f'''
+                SELECT p.nombre, 
+                       COALESCE((SELECT SUM(d.cantidad) 
+                                 FROM detalle_ventas d 
+                                 JOIN ventas v ON d.venta_id = v.id 
+                                 WHERE d.producto_id = p.id 
+                                 { "AND v.fecha >= ?" if params_sub else "" }
+                                ), 0) as total_vendido
+                FROM productos p
+                ORDER BY total_vendido DESC
+            '''
+            
+            cursor.execute(query_clean, params_sub)
             columnas = ["Producto", "Unidades Vendidas"]
             data = cursor.fetchall()
 
@@ -677,7 +695,7 @@ class VistaPrincipal:
         cmb_filtro_cat.current(0)
         cmb_filtro_cat.pack(side="left")
 
-        # NUEVO FILTRO: PROVEEDOR
+        # Filtro Proveedor
         tk.Label(frm_filtros, text="Proveedor:").pack(side="left", padx=5)
         provs = [p[1] for p in self.controller.obtener_proveedores()]
         cmb_filtro_prov = ttk.Combobox(frm_filtros, values=["Todos"] + provs)
@@ -722,7 +740,7 @@ class VistaPrincipal:
             filtros = {
                 "nombre": txt_filtro_nombre.get(),
                 "categoria": cmb_filtro_cat.get(),
-                "proveedor": cmb_filtro_prov.get() # Nuevo parametro
+                "proveedor": cmb_filtro_prov.get() 
             }
             productos = list(self.controller.obtener_productos(filtros))
             
@@ -1235,7 +1253,6 @@ class VistaPrincipal:
                 messagebox.showinfo("Info", "Este cliente no tiene compras registradas.")
             
             for v in ventas:
-                # v tiene: id, fecha, total, username, metodo
                 metodo = v[4] if v[4] else "Desconocido"
                 tree_ventas.insert("", "end", values=(v[0], v[1], f"${v[2]:.2f}", v[3], metodo))
 
@@ -1627,7 +1644,39 @@ class VistaPrincipal:
         def mostrar_datos_en_tabla(cols, data):
             for i in self.tree_reportes.get_children(): self.tree_reportes.delete(i)
             self.tree_reportes["columns"] = cols
-            for c in cols: self.tree_reportes.heading(c, text=c)
+            
+            # --- ORDENAMIENTO REPORTE ---
+            self.orden_reporte = {"col": "", "reverse": False}
+            
+            def ordenar_reporte(col):
+                if self.orden_reporte["col"] == col:
+                    self.orden_reporte["reverse"] = not self.orden_reporte["reverse"]
+                else:
+                    self.orden_reporte["col"] = col
+                    self.orden_reporte["reverse"] = False
+                
+                # Actualizar headers
+                for c in cols:
+                    self.tree_reportes.heading(c, text=c, command=lambda _c=c: ordenar_reporte(_c))
+                
+                flecha = " ▼" if self.orden_reporte["reverse"] else " ▲"
+                self.tree_reportes.heading(col, text=col + flecha, command=lambda: ordenar_reporte(col))
+                
+                # Obtener items
+                items = [(self.tree_reportes.set(k, col), k) for k in self.tree_reportes.get_children('')]
+                
+                # Intentar ordenar numericamente si es posible
+                try:
+                    items.sort(key=lambda t: float(t[0].replace("$","").replace(" ","")), reverse=self.orden_reporte["reverse"])
+                except ValueError:
+                    items.sort(reverse=self.orden_reporte["reverse"])
+
+                for index, (val, k) in enumerate(items):
+                    self.tree_reportes.move(k, '', index)
+
+            for c in cols: 
+                self.tree_reportes.heading(c, text=c, command=lambda _c=c: ordenar_reporte(_c))
+            
             for d in data: self.tree_reportes.insert("", "end", values=d)
             self.lbl_total_reporte.config(text="") # Limpiar total por defecto
 
@@ -1679,7 +1728,20 @@ class VistaPrincipal:
             
             # Tabla resultados
             self.tree_reportes = ttk.Treeview(self.content_area, columns=("ID", "Fecha", "Cliente", "Vendedor", "Total", "Método"), show="headings")
-            for c in ("ID", "Fecha", "Cliente", "Vendedor", "Total", "Método"): self.tree_reportes.heading(c, text=c)
+            
+            # Agregamos ordenamiento tambien aqui
+            def ordenar_ventas(col):
+                items = [(self.tree_reportes.set(k, col), k) for k in self.tree_reportes.get_children('')]
+                try:
+                    items.sort(key=lambda t: float(t[0].replace("$","")), reverse=True) # Default desc
+                except:
+                    items.sort(reverse=True)
+                for index, (val, k) in enumerate(items):
+                    self.tree_reportes.move(k, '', index)
+
+            for c in ("ID", "Fecha", "Cliente", "Vendedor", "Total", "Método"): 
+                self.tree_reportes.heading(c, text=c, command=lambda _c=c: ordenar_ventas(_c))
+            
             self.tree_reportes.pack(fill="both", expand=True, padx=20, pady=10)
             
             self.lbl_total_reporte = tk.Label(self.content_area, text="Total Ventas: $0.00", font=("Arial", 16, "bold"), fg="green")
@@ -1716,10 +1778,10 @@ class VistaPrincipal:
             
             aplicar_filtro() # Carga inicial
 
-        # REPORTE AVANZADO: TOP PRODUCTOS
+        # REPORTE AVANZADO: TOP PRODUCTOS (ROTACIÓN)
         def mostrar_filtro_top_productos():
             self.limpiar_contenido()
-            tk.Label(self.content_area, text="Reporte: Productos Más Vendidos", font=("Arial", 18)).pack(pady=10)
+            tk.Label(self.content_area, text="Reporte: Rotación de Productos", font=("Arial", 18)).pack(pady=10)
             
             frm_filtros = tk.LabelFrame(self.content_area, text="Filtro de Tiempo")
             frm_filtros.pack(fill="x", padx=20, pady=5)
@@ -1744,8 +1806,6 @@ class VistaPrincipal:
             cmb_periodo.bind("<<ComboboxSelected>>", toggle_entry)
             
             self.tree_reportes = ttk.Treeview(self.content_area, columns=("Producto", "Unidades Vendidas"), show="headings")
-            self.tree_reportes.heading("Producto", text="Producto")
-            self.tree_reportes.heading("Unidades Vendidas", text="Unidades Vendidas")
             self.tree_reportes.pack(fill="both", expand=True, padx=20, pady=10)
             
             def aplicar_filtro_top():
@@ -1765,7 +1825,7 @@ class VistaPrincipal:
 
         # Botón principal para ir al reporte avanzado
         ttk.Button(frm_btns, text="💰 Ventas Totales", command=mostrar_filtro_ventas).pack(side="left", padx=5)
-        ttk.Button(frm_btns, text="Más Vendidos", command=mostrar_filtro_top_productos).pack(side="left", padx=5)
+        ttk.Button(frm_btns, text="Más Vendidos / Rotación", command=mostrar_filtro_top_productos).pack(side="left", padx=5)
 
     def importar_csv_productos(self):
         archivo_path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
