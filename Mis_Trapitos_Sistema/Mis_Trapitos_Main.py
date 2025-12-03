@@ -148,12 +148,23 @@ class DatabaseManager:
         conn = self.conectar()
         cursor = conn.cursor()
         
+        # Usuario Admin
         cursor.execute("SELECT * FROM usuarios WHERE username='admin'")
         if not cursor.fetchone():
             cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", 
                            ('admin', 'admin123', 'Administrador'))
+            
+        # Usuario Vendedor
+        cursor.execute("SELECT * FROM usuarios WHERE username='vendedor'")
+        if not cursor.fetchone():
             cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", 
                            ('vendedor', '1234', 'Vendedor'))
+            
+        # NUEVO: Usuario Inventario (Almacén)
+        cursor.execute("SELECT * FROM usuarios WHERE username='almacen'")
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)", 
+                           ('almacen', '1234', 'Inventario'))
 
         categorias = ['Camisetas', 'Pantalones', 'Accesorios', 'Calzado', 'Vestidos']
         for cat in categorias:
@@ -258,7 +269,6 @@ class Controller:
         conn.close()
         return data
     
-    # NUEVO: Eliminar Producto
     def eliminar_producto(self, prod_id):
         conn = self.db.conectar()
         cursor = conn.cursor()
@@ -651,7 +661,14 @@ class VistaPrincipal:
         self.crear_menu_lateral()
         self.crear_area_contenido()
         
-        self.mostrar_inventario()
+        # Pantalla inicial segun rol
+        if self.usuario[3] == "Inventario":
+             self.mostrar_inventario()
+        elif self.usuario[3] == "Vendedor":
+             self.mostrar_pos()
+        else:
+             self.mostrar_inventario()
+             
         self.root.mainloop()
 
     def crear_menu_lateral(self):
@@ -662,17 +679,27 @@ class VistaPrincipal:
         lbl_logo = tk.Label(self.frm_menu, text="👗\nMis Trapitos", bg=estilos.COLOR_SIDEBAR, fg="white", font=("Arial", 16))
         lbl_logo.pack(pady=20)
         
-        btns = [
-            ("Inventario", self.mostrar_inventario),
-            ("Punto de Venta", self.mostrar_pos),
-            ("Clientes", self.mostrar_clientes)
-        ]
+        btns = []
+        rol = self.usuario[3]
         
-        if self.usuario[3] == "Administrador":
+        # Configuración de menús por Rol
+        btns.append(("Inventario", self.mostrar_inventario)) # Comun
+
+        if rol == "Administrador":
+            btns.append(("Punto de Venta", self.mostrar_pos))
+            btns.append(("Clientes", self.mostrar_clientes))
             btns.append(("Proveedores", self.mostrar_proveedores))
             btns.append(("Promociones", self.mostrar_promociones))
             btns.append(("Reportes", self.mostrar_reportes))
             btns.append(("Importar Productos", self.importar_csv_productos))
+        
+        elif rol == "Vendedor":
+            btns.append(("Punto de Venta", self.mostrar_pos))
+            btns.append(("Clientes", self.mostrar_clientes))
+            
+        elif rol == "Inventario":
+            btns.append(("Proveedores", self.mostrar_proveedores))
+            btns.append(("Reportes", self.mostrar_reportes))
 
         for txt, cmd in btns:
             btn = tk.Button(self.frm_menu, text=txt, command=cmd)
